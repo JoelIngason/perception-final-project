@@ -7,7 +7,7 @@ import numpy as np
 class Rectifier:
     def __init__(self, calibration_params: dict[str, np.ndarray]):
         self.calibration_params = calibration_params
-        self.logger = logging.getLogger('autonomous_perception.calibration')
+        self.logger = logging.getLogger('asutonomous_perception.calibration')
         self.left_map, self.right_map = self._compute_rectification_maps()
 
     def _compute_rectification_maps(self) -> tuple[np.ndarray, np.ndarray]:
