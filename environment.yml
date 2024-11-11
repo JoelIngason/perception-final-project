@@ -10,7 +10,7 @@ dependencies:
   - scikit-learn
   - pytorch
   - torchvision
-  - "cudatoolkit; not (platform_system == 'Darwin' and platform_machine == 'arm64')"
+  - cudatoolkit
   - opencv
   - matplotlib
   - seaborn
