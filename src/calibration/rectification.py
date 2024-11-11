@@ -37,6 +37,6 @@ class Rectifier:
 
     def rectify_images(self, img_left: np.ndarray, img_right: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         self.logger.debug("Rectifying image pair")
-        rectified_left = cv2.remap(img_left, self.left_map, None, cv2.INTER_LINEAR)
-        rectified_right = cv2.remap(img_right, self.right_map, None, cv2.INTER_LINEAR)
+        rectified_left = cv2.remap(img_left, self.left_map, np.zeros_like(self.left_map), cv2.INTER_LINEAR)
+        rectified_right = cv2.remap(img_right, self.right_map, np.zeros_like(self.right_map), cv2.INTER_LINEAR)
         return rectified_left, rectified_right

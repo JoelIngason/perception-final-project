@@ -72,7 +72,7 @@ class DataLoader:
             img_left = cv2.imread(os.path.join(rect_image02_path, rect_img02))
             img_right = cv2.imread(os.path.join(rect_image03_path, rect_img03))
 
-            frame_labels = self._get_labels_for_frame(labels, frame_number=self._extract_frame_number(raw_img02))
+            frame_labels = self._get_labels_for_frame(labels or [], frame_number=self._extract_frame_number(raw_img02))
             frame = Frame(
                 image_left=img_left,
                 image_right=img_right,

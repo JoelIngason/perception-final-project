@@ -1,3 +1,4 @@
+# src/main.py
 import argparse
 
 import yaml
@@ -25,37 +26,33 @@ def main(config_path):
     # Initialize components
     data_loader = DataLoader(config['data'])
     calibrator = StereoCalibrator(config['calibration'])
-    calibration_params = calibrator.calibrate(config['data']['calibration_file'])
-    rectifier = Rectifier(calibration_params)
+
     detector = ObjectDetector(config['detection'])
     tracker = ObjectTracker(config['tracking'])
     classifier = Classifier(config['classification'])
     evaluator = Evaluator()
     visualizer = Visualizer()
 
+    calibration_file = config['calibration']['calibration_file']
+    # Load and calibrate data
+    calib_params = calibrator.calibrate(calibration_file)
     # Load and rectify data
     use_rectified = config['processing']['use_rectified_data']
     data = None
-
+    rectifier = Rectifier(calib_params)
     if use_rectified:
-        data = data_loader.load_sequences(calibration_params)
+        data = data_loader.load_sequences(calib_params)
         # Images are already rectified
     else:
-        data = data_loader.load_sequences_raw(calibration_params)
+        print("gg")
+        #data = data_loader.load_sequences_raw(calib_params)
         # Apply rectification if necessary
 
-
     # Detection and Tracking Loop
-    for frame in data:
-        # Rectify images if not already rectified (depending on data)
-        # Assuming data is already rectified in '34759_final_project_rect'
-        # If processing raw data, uncomment the following lines:
-        # rectified_left, rectified_right = rectifier.rectify_images(frame.images[0], frame.images[1])
-        # frame.images = (rectified_left, rectified_right)
-
+    for frame in data:  # type: ignore
         detections = detector.detect(frame.images)
         tracked_objects = tracker.update(detections)
-        classifications = classifier.classify(tracked_objects)
+        classifications = classifier.classify(tracked_objects, frame.images)
         evaluator.evaluate(tracked_objects, frame.labels)
         visualizer.display(frame, tracked_objects, classifications)
 

@@ -21,3 +21,4 @@ dependencies:
     - tensorboard
     - torch-tb-profiler
     - tensorboard-plugin-profile
+    - sort-track
