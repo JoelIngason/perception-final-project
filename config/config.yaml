@@ -1,0 +1,32 @@
+# config/config.yaml
+data:
+  raw_sequences_path: "../data/34759_final_project_raw/sequences/"
+  rect_sequences_path: "../data/34759_final_project_rect/sequences/"
+  calibration_file: "../data/34759_final_project_raw/calibration/calib_cam_to_cam.txt"
+  rectified_images_path: "../data/34759_final_project_rect/rectified_images/"
+  labels_path: "../data/34759_final_project_raw/labels/"
+
+calibration:
+  chessboard_size: [9, 6]
+  square_size: 0.025  # in meters
+
+detection:
+  model: "yolov5"
+  confidence_threshold: 0.5
+  nms_threshold: 0.4
+
+tracking:
+  algorithm: "kalman"
+  max_age: 30
+  min_hits: 3
+
+classification:
+  model_path: "../models/classifier.pth"
+  input_size: 224
+
+logging:
+  config_file: "logging.yaml"
+  
+processing:
+  use_rectified_data: true  # Set to false to process raw data
+

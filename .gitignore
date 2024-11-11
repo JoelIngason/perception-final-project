@@ -1,0 +1,98 @@
+# Data
+data/*
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Data directories
+/data/raw/
+/data/processed/
+
+# Model checkpoints
+/models/checkpoints/
+
+# Model Runs
+/runs
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Ruff linter cache
+.ruff_cache/
+
+# Python cache
+__pycache__/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Test reports
+test_report/
+tests/__pycache__/
+
+# SQLite database
+*.sqlite3
+
+# Secrets and API keys
+*.env
+*.env.local
+*.env.*.local
+.env/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

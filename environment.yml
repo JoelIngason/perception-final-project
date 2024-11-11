@@ -1,0 +1,23 @@
+name: perception-final-project
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - scikit-learn
+  - pytorch
+  - torchvision
+  - "cudatoolkit; not (platform_system == 'Darwin' and platform_machine == 'arm64')"
+  - opencv
+  - matplotlib
+  - seaborn
+  - pyyaml
+  - ruff
+  - python-dotenv
+  - pip:
+    - tensorboard
+    - torch-tb-profiler
+    - tensorboard-plugin-profile

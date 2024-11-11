@@ -1,0 +1,141 @@
+# File: tmp/.ruff.toml
+# ---------------------
+
+select = [
+    "F",
+    "E",
+    "W",
+    "C90",
+    "I",
+    "D",
+    "UP",
+    "YTT",
+    "ANN",
+    "S",
+    "BLE",
+    "B",
+    "A",
+    "COM",
+    "DTZ",
+    "EM",
+    "ERA",
+    "EXE",
+    "FBT",
+    "ICN",
+    "PL",
+    "PT",
+    "PTH",
+    "PYI",
+    "RET",
+    "RSE",
+    "RUF",
+    "SIM",
+    "SLF",
+    "TCH",
+    "TID",
+    "TRY",
+    "NPY",
+    "PD",
+]
+
+ignore = [
+    "D100",
+    "D103",
+    "D417",
+    "D107",
+    "ANN101",
+    "ANN102",
+    "G004",
+    "ANN401",
+    "BLE001",
+    "PTH123",
+    "D212",
+    "FBT001",
+    "FBT002",  # Allowed with type annotations
+    "FBT003",
+]
+
+fixable = [
+    "I",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "I",
+    "N",
+    "Q",
+    "S",
+    "T",
+    "W",
+    "ANN",
+    "ARG",
+    "BLE",
+    "COM",
+    "DJ",
+    "DTZ",
+    "EM",
+    "ERA",
+    "EXE",
+    "FBT",
+    "ICN",
+    "INP",
+    "ISC",
+    "NPY",
+    "PGH",
+    "PIE",
+    "PL",
+    "PT",
+    "PTH",
+    "PYI",
+    "RET",
+    "RSE",
+    "RUF",
+    "SIM",
+    "SLF",
+    "TCH",
+    "TID",
+    "TRY",
+    "UP",
+    "YTT",
+]
+
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+line-length = 100
+target-version = "py310"
+
+[flake8-annotations]
+allow-star-arg-any = true
+ignore-fully-untyped = true
+
+[per-file-ignores]
+"*/tests/__init__.py" = ["D104"]
+"*/test/__init__.py" = ["D104"]
+"*/test/*" = ["S101", "SLF001"]
