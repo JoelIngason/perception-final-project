@@ -1,12 +1,12 @@
-# src/data_loader/dataset.py
+import logging
 import os
+
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional
-import logging
+
 
 class Frame:
-    def __init__(self, image_left: np.ndarray, image_right: np.ndarray, timestamp: Tuple[float, float], labels: Optional[List[dict]] = None):
+    def __init__(self, image_left: np.ndarray, image_right: np.ndarray, timestamp: tuple[float, float], labels: list[dict] | None = None):
         self.images = (image_left, image_right)
         self.timestamp = timestamp
         self.labels = labels
@@ -27,7 +27,7 @@ class DataLoader:
         rect_sequences = sorted(os.listdir(self.rect_sequences_path))
         all_frames = []
 
-        for raw_seq, rect_seq in zip(raw_sequences, rect_sequences):
+        for raw_seq, rect_seq in zip(raw_sequences, rect_sequences, strict=False):
             self.logger.info(f"Loading sequence: {raw_seq}")
             raw_seq_path = os.path.join(self.raw_sequences_path, raw_seq)
             rect_seq_path = os.path.join(self.rect_sequences_path, rect_seq)
@@ -36,7 +36,7 @@ class DataLoader:
 
         return all_frames
 
-    def _load_sequence(self, raw_seq_path: str, rect_seq_path: str) -> List[Frame]:
+    def _load_sequence(self, raw_seq_path: str, rect_seq_path: str) -> list[Frame]:
         # Paths for raw images
         raw_image02_path = os.path.join(raw_seq_path, 'image02', 'data')
         raw_image03_path = os.path.join(raw_seq_path, 'image03', 'data')
@@ -62,7 +62,7 @@ class DataLoader:
         for raw_img02, raw_img03, rect_img02, rect_img03, ts02, ts03 in zip(
             raw_image_files02, raw_image_files03,
             rect_image_files02, rect_image_files03,
-            raw_timestamps02, raw_timestamps03
+            raw_timestamps02, raw_timestamps03, strict=False,
         ):
             # Load raw images if needed
             # img_left_raw = cv2.imread(os.path.join(raw_image02_path, raw_img02))
@@ -77,20 +77,20 @@ class DataLoader:
                 image_left=img_left,
                 image_right=img_right,
                 timestamp=(ts02, ts03),
-                labels=frame_labels
+                labels=frame_labels,
             )
             frames.append(frame)
 
         return frames
 
-    def _load_timestamps(self, filepath: str) -> List[float]:
-        with open(filepath, 'r') as f:
+    def _load_timestamps(self, filepath: str) -> list[float]:
+        with open(filepath) as f:
             timestamps = [float(line.strip()) for line in f]
         return timestamps
 
-    def _load_labels(self, labels_file: str) -> List[dict]:
+    def _load_labels(self, labels_file: str) -> list[dict]:
         labels = []
-        with open(labels_file, 'r') as f:
+        with open(labels_file) as f:
             for line in f:
                 parts = line.strip().split()
                 label = {
@@ -104,12 +104,12 @@ class DataLoader:
                     'dimensions': list(map(float, parts[10:13])),
                     'location': list(map(float, parts[13:16])),
                     'rotation_y': float(parts[16]),
-                    'score': float(parts[17]) if len(parts) > 17 else None
+                    'score': float(parts[17]) if len(parts) > 17 else None,
                 }
                 labels.append(label)
         return labels
 
-    def _get_labels_for_frame(self, labels: List[dict], frame_number: int) -> List[dict]:
+    def _get_labels_for_frame(self, labels: list[dict], frame_number: int) -> list[dict]:
         if labels is None:
             return []
         return [label for label in labels if label['frame'] == frame_number]

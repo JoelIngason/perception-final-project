@@ -1,12 +1,11 @@
-# src/detection/object_detector.py
-import torch
-import cv2
-import numpy as np
 import logging
-from typing import List, Tuple
+
+import numpy as np
+import torch
+
 
 class DetectionResult:
-    def __init__(self, bbox: List[float], confidence: float, class_id: int):
+    def __init__(self, bbox: list[float], confidence: float, class_id: int):
         self.bbox = bbox  # [x1, y1, x2, y2]
         self.confidence = confidence
         self.class_id = class_id
@@ -30,7 +29,7 @@ class ObjectDetector:
         self.logger.info("Detection model loaded successfully")
         return model
 
-    def detect(self, images: Tuple[np.ndarray, np.ndarray]) -> List[DetectionResult]:
+    def detect(self, images: tuple[np.ndarray, np.ndarray]) -> list[DetectionResult]:
         # Perform detection on the left rectified image
         img_left, _ = images
         self.logger.debug("Performing detection on left image")
@@ -38,7 +37,7 @@ class ObjectDetector:
         detections = self._process_results(results)
         return detections
 
-    def _process_results(self, results) -> List[DetectionResult]:
+    def _process_results(self, results) -> list[DetectionResult]:
         detections = []
         for *box, conf, cls in results.xyxy[0].tolist():
             if conf >= self.conf_threshold:

@@ -1,9 +1,11 @@
-import torch
-import torchvision.transforms as transforms
-from PIL import Image
 import logging
-from typing import List, Optional
+
+import cv2
 import numpy as np
+import torch
+from PIL import Image
+from torchvision import transforms
+
 
 class ClassificationResult:
     def __init__(self, class_id: int, confidence: float):
@@ -30,7 +32,7 @@ class Classifier:
         self.logger.info("Classification model loaded successfully")
         return model
 
-    def classify(self, tracked_objects: np.ndarray, images: Tuple[np.ndarray, np.ndarray]) -> List[ClassificationResult]:
+    def classify(self, tracked_objects: np.ndarray, images: tuple[np.ndarray, np.ndarray]) -> list[ClassificationResult]:
         classifications = []
         img_left, _ = images
         for obj in tracked_objects:
@@ -47,7 +49,7 @@ class Classifier:
         self.logger.debug(f"Classification results: {len(classifications)}")
         return classifications
 
-    def _get_roi(self, image: np.ndarray, bbox: List[int]) -> Optional[Image.Image]:
+    def _get_roi(self, image: np.ndarray, bbox: list[int]) -> Image.Image | None:
         x1, y1, x2, y2 = bbox
         x1, y1 = max(x1, 0), max(y1, 0)
         x2, y2 = min(x2, image.shape[1] - 1), min(y2, image.shape[0] - 1)

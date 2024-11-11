@@ -1,8 +1,7 @@
-# src/calibration/stereo_calibration.py
-import cv2
-import numpy as np
 import logging
-from typing import Dict
+
+import numpy as np
+
 
 class StereoCalibrator:
     def __init__(self, config):
@@ -10,16 +9,16 @@ class StereoCalibrator:
         self.square_size = config['square_size']
         self.logger = logging.getLogger('autonomous_perception.calibration')
 
-    def calibrate(self, calibration_file: str) -> Dict[str, np.ndarray]:
+    def calibrate(self, calibration_file: str) -> dict[str, np.ndarray]:
         self.logger.info("Starting stereo calibration")
         # Load calibration parameters from file
         calib_params = self._load_calibration_file(calibration_file)
         self.logger.info("Stereo calibration completed")
         return calib_params
 
-    def _load_calibration_file(self, filepath: str) -> Dict[str, np.ndarray]:
+    def _load_calibration_file(self, filepath: str) -> dict[str, np.ndarray]:
         calib_params = {}
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             for line in f:
                 if ':' not in line:
                     continue

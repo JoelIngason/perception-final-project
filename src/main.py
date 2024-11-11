@@ -1,20 +1,21 @@
-# src/main.py
 import argparse
+
 import yaml
-import logging
-from src.utils.logger import setup_logger
-from src.data_loader.dataset import DataLoader
-from src.calibration.stereo_calibration import StereoCalibrator
+
 from src.calibration.rectification import Rectifier
-from src.detection.object_detector import ObjectDetector
-from src.tracking.object_tracker import ObjectTracker
+from src.calibration.stereo_calibration import StereoCalibrator
 from src.classification.classifier import Classifier
+from src.data_loader.dataset import DataLoader
+from src.detection.object_detector import ObjectDetector
 from src.evaluation.evaluator import Evaluator
+from src.tracking.object_tracker import ObjectTracker
+from src.utils.logger import setup_logger
 from src.visualization.visualizer import Visualizer
+
 
 def main(config_path):
     # Load configuration
-    with open(config_path, 'r') as file:
+    with open(config_path) as file:
         config = yaml.safe_load(file)
 
     # Setup logger
