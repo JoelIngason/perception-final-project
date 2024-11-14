@@ -1,4 +1,3 @@
-# config/logging.yaml
 version: 1
 formatters:
   simple:
