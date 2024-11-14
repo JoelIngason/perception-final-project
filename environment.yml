@@ -1,4 +1,4 @@
-name: perception-final-project
+name: perception
 channels:
   - conda-forge
   - defaults
@@ -17,8 +17,10 @@ dependencies:
   - pyyaml
   - ruff
   - python-dotenv
+  - ultralytics
   - pip:
     - tensorboard
     - torch-tb-profiler
     - tensorboard-plugin-profile
     - sort-track
+    - deep-sort-realtime
