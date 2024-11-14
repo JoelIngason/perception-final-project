@@ -77,7 +77,7 @@ def main(config_path: str):
         logger.info("Loaded raw data sequences.")
         # Apply rectification if necessary
         for seq_id in range(len(data)):
-            data[str(seq_id + 1)] = rectifier.rectify(data[str(seq_id + 1)])
+            data[str(seq_id + 1)] = rectifier.rectify_data(data[str(seq_id + 1)])
 
         logger.info("Applied rectification to raw data.")
 
