@@ -35,7 +35,7 @@ class DataLoader:
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def load_sequences(self, calib_params) -> list[Frame]:
+    def load_sequences_rect(self, calib_params) -> dict[str, list[Frame]]:
         """
         Load all rectified sequences of frames based on rectified paths.
 
@@ -43,31 +43,24 @@ class DataLoader:
             calib_params (dict[str, np.ndarray]): Calibration parameters.
 
         Returns:
-            List[Frame]: A list of Frame objects containing image data and metadata.
+            Dict[str, List[Frame]]: A dictionary of rectified sequences with Frame objects.
 
         """
         self.logger.info("Loading rectified sequences")
-        all_frames = []
+        all_frames = {}
 
-        num_sequences = min(len(self.raw_sequences_paths), len(self.rect_sequences_paths))
-
-        if len(self.raw_sequences_paths) != len(self.rect_sequences_paths):
-            self.logger.warning(
-                "Number of raw sequences and rectified sequences do not match. "
-                f"Proceeding with {num_sequences} sequences.",
-            )
+        num_sequences = len(self.rect_sequences_paths)
 
         for idx in range(num_sequences):
-            raw_seq_path = self.raw_sequences_paths[idx]
             rect_seq_path = self.rect_sequences_paths[idx]
             self.logger.info(f"Loading rectified sequence {idx + 1}: {rect_seq_path}")
             frames = self._load_sequence_rectified(rect_seq_path)
-            all_frames.extend(frames)
+            all_frames[str(idx + 1)] = frames
 
-        self.logger.info(f"Loaded a total of {len(all_frames)} rectified frames.")
+        self.logger.info(f"Loaded a total of {len(all_frames)} rectified sequences.")
         return all_frames
 
-    def load_sequences_raw(self, calib_params) -> list[Frame]:
+    def load_sequences_raw(self, calib_params) -> dict[str, list[Frame]]:
         """
         Load all raw sequences of frames based on raw paths.
 
@@ -75,11 +68,11 @@ class DataLoader:
             calib_params (dict[str, np.ndarray]): Calibration parameters.
 
         Returns:
-            List[Frame]: A list of Frame objects containing raw image data and metadata.
+            Dict[str, List[Frame]]: A dictionary of raw sequences with Frame objects.
 
         """
         self.logger.info("Loading raw sequences")
-        all_frames = []
+        all_frames = {}
 
         num_sequences = len(self.raw_sequences_paths)
 
@@ -97,7 +90,7 @@ class DataLoader:
 
             self.logger.info(f"Loading raw sequence {idx + 1}: {raw_seq_path}")
             frames = self._load_sequence_raw(raw_seq_path, rect_seq_path)
-            all_frames.extend(frames)
+            all_frames[str(idx + 1)] = frames
 
         self.logger.info(f"Loaded a total of {len(all_frames)} raw frames.")
         return all_frames
@@ -422,43 +415,3 @@ class DataLoader:
         except ValueError:
             self.logger.error(f"Invalid filename format for extracting frame number: {filename}")
             return -1  # Indicates an invalid frame number
-
-
-# Example Usage
-if __name__ == "__main__":
-    # Example configuration
-    config = {
-        "raw_sequences_path": ["path/to/raw_seq1", "path/to/raw_seq2"],
-        "rect_sequences_path": ["path/to/rect_seq1", "path/to/rect_seq2"],
-        "calibration_file": "path/to/calibration.txt",
-        "rectified_images_path": "path/to/rectified_images",
-    }
-
-    # Initialize the DataLoader
-    data_loader = DataLoader(config)
-
-    # Assume calib_params is obtained from StereoCalibrator
-    # For demonstration, we'll mock calib_params as an empty dict
-    calib_params = {}
-
-    # Load rectified sequences
-    rectified_data = data_loader.load_sequences(calib_params)
-
-    # Load raw sequences
-    raw_data = data_loader.load_sequences_raw(calib_params)
-
-    # Accessing the first rectified frame (if available)
-    if rectified_data:
-        first_rect_frame = rectified_data[0]
-        print("First rectified frame timestamp:", first_rect_frame.timestamp)
-        print("First rectified frame labels:", first_rect_frame.labels)
-    else:
-        print("No rectified frames loaded.")
-
-    # Accessing the first raw frame (if available)
-    if raw_data:
-        first_raw_frame = raw_data[0]
-        print("First raw frame timestamp:", first_raw_frame.timestamp)
-        print("First raw frame labels:", first_raw_frame.labels)
-    else:
-        print("No raw frames loaded.")
