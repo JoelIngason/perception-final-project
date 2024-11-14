@@ -48,7 +48,7 @@ class TrackedObject:
 class ObjectDetector:
     SUPPORTED_LABELS = {"person", "car", "bicycle"}
 
-    def __init__(self, config: dict, calib_params: dict[str, np.ndarray], sequence_number: int):
+    def __init__(self, config: dict, calib_params: dict[str, np.ndarray]):
         """
         Initialize the ObjectDetector with detection and tracking models.
 
@@ -64,11 +64,8 @@ class ObjectDetector:
         self.model = self._load_model()
         self.tracker = self._initialize_tracker()
         self.calib_params = calib_params
-        self.focal_length = calib_params[f"K_{sequence_number}"][
-            0,
-            0,
-        ]  # Focal length from camera matrix
-        self.baseline = np.linalg.norm(calib_params[f"T_{sequence_number}"])
+        self.focal_length = calib_params["K_02"][0, 0]  # fx from left camera intrinsic matrix
+        self.baseline = np.linalg.norm(calib_params["T_02"])  # Baseline from translation vector
 
     def _load_model(self) -> YOLO:
         """

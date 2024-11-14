@@ -3,6 +3,7 @@ import logging
 
 import cv2
 import yaml
+from matplotlib.pylab import f
 
 # Importing necessary classes from respective modules
 from src.calibration.rectification import Rectifier
@@ -88,8 +89,9 @@ def main(config_path: str):
 
     # Detection and Tracking Loop
     try:
-        for idx, frame in enumerate(data, 1):  # Enumerate for tracking progress
-            try:
+        for idx, seq in enumerate(data, 1):  # Enumerate for tracking progress
+            detector = ObjectDetector(config, calib_params)
+            for frame in data[seq]:
                 images = frame.images  # Tuple of (left_image, right_image)
                 detections, tracked_objects = detector.detect_and_track(images)
 
@@ -101,9 +103,6 @@ def main(config_path: str):
 
                 logger.debug(f"Processed frame {idx}/{len(data)}")
 
-            except Exception as frame_e:
-                logger.error(f"Error processing frame {idx}: {frame_e}")
-                continue  # Continue with the next frame
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user. Exiting...")
     except Exception as e:
