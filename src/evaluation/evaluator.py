@@ -5,7 +5,7 @@ from src.evaluation.metrics import compute_precision_recall
 
 class Evaluator:
     def __init__(self):
-        self.logger = logging.getLogger('autonomous_perception.evaluation')
+        self.logger = logging.getLogger("autonomous_perception.evaluation")
         self.predictions = []
         self.ground_truth = []
 
