@@ -20,24 +20,24 @@ def main(config_path):
         config = yaml.safe_load(file)
 
     # Setup logger
-    logger = setup_logger('autonomous_perception', config['logging']['config_file'])
+    logger = setup_logger("autonomous_perception", config["logging"]["config_file"])
     logger.info("Starting Autonomous Perception Pipeline")
 
     # Initialize components
-    data_loader = DataLoader(config['data'])
-    calibrator = StereoCalibrator(config['calibration'])
+    data_loader = DataLoader(config["data"])
+    calibrator = StereoCalibrator(config["calibration"])
 
-    detector = ObjectDetector(config['detection'])
-    tracker = ObjectTracker(config['tracking'])
-    classifier = Classifier(config['classification'])
+    detector = ObjectDetector(config["detection"])
+    tracker = ObjectTracker(config["tracking"])
+    classifier = Classifier(config["classification"])
     evaluator = Evaluator()
     visualizer = Visualizer()
 
-    calibration_file = config['calibration']['calibration_file']
+    calibration_file = config["calibration"]["calibration_file"]
     # Load and calibrate data
     calib_params = calibrator.calibrate(calibration_file)
     # Load and rectify data
-    use_rectified = config['processing']['use_rectified_data']
+    use_rectified = config["processing"]["use_rectified_data"]
     data = None
     rectifier = Rectifier(calib_params)
     if use_rectified:
@@ -45,7 +45,7 @@ def main(config_path):
         # Images are already rectified
     else:
         print("gg")
-        #data = data_loader.load_sequences_raw(calib_params)
+        # data = data_loader.load_sequences_raw(calib_params)
         # Apply rectification if necessary
 
     # Detection and Tracking Loop
@@ -60,8 +60,11 @@ def main(config_path):
     evaluator.report()
     logger.info("Autonomous Perception Pipeline Completed")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Autonomous Perception Pipeline")
-    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to configuration file')
+    parser.add_argument(
+        "--config", type=str, default="config/config.yaml", help="Path to configuration file"
+    )
     args = parser.parse_args()
     main(args.config)
