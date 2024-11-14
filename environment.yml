@@ -2,6 +2,7 @@ name: perception
 channels:
   - conda-forge
   - defaults
+  - zimmf # For cudatoolkit on m1/m2/mx mac
 dependencies:
   - python=3.11
   - pip

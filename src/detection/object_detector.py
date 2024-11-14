@@ -10,20 +10,21 @@ class DetectionResult:
         self.confidence = confidence
         self.class_id = class_id
 
+
 class ObjectDetector:
     def __init__(self, config):
-        self.model_name = config['model']
-        self.conf_threshold = config['confidence_threshold']
-        self.nms_threshold = config['nms_threshold']
-        self.logger = logging.getLogger('autonomous_perception.detection')
+        self.model_name = config["model"]
+        self.conf_threshold = config["confidence_threshold"]
+        self.nms_threshold = config["nms_threshold"]
+        self.logger = logging.getLogger("autonomous_perception.detection")
         self.model = self._load_model()
 
     def _load_model(self):
         self.logger.info(f"Loading detection model: {self.model_name}")
-        if self.model_name.lower() == 'yolov11':
-            model = torch.hub.load('ultralytics/yolov11', 'yolov11s', pretrained=True)
-            setattr(model, 'conf', self.conf_threshold)
-            setattr(model, 'iou', self.nms_threshold)
+        if self.model_name.lower() == "yolov11":
+            model = torch.hub.load("ultralytics/yolov11", "yolov11s", pretrained=True)
+            setattr(model, "conf", self.conf_threshold)
+            setattr(model, "iou", self.nms_threshold)
         else:
             raise ValueError(f"Unsupported model: {self.model_name}")
         self.logger.info("Detection model loaded successfully")

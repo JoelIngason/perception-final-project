@@ -10,7 +10,7 @@ SUPPORTED_LABELS = {"person", "car", "bicycle"}
 LABEL_BACKGROUND_COLOR = (0, 0, 0, 0.5)  # Black with 50% opacity
 BBOX_COLOR = "red"
 LABEL_TEXT_COLOR = "white"
-VIDEO_CODEC = 'avc1'
+VIDEO_CODEC = "avc1"
 OUTPUT_VIDEO_EXTENSION = ".mp4"
 FPS = 30
 
@@ -36,11 +36,16 @@ def plot_detections(img: cv2.Mat, tracked_objects: list, model: YOLO) -> None:
         track_id = obj.track_id
         bbox = obj.to_ltwh()
         label_id = obj.get_det_class()
-        label_name = model.names[label_id] if label_id is not None and label_id < len(model.names) else "unknown"
+        label_name = (
+            model.names[label_id]
+            if label_id is not None and label_id < len(model.names)
+            else "unknown"
+        )
 
         # Draw bounding box
-        rect = plt.Rectangle((bbox[0], bbox[1]), bbox[2], bbox[3],
-                             fill=False, edgecolor=BBOX_COLOR, linewidth=2)
+        rect = plt.Rectangle(
+            (bbox[0], bbox[1]), bbox[2], bbox[3], fill=False, edgecolor=BBOX_COLOR, linewidth=2
+        )
         ax.add_patch(rect)
 
         # Prepare label text
@@ -48,13 +53,13 @@ def plot_detections(img: cv2.Mat, tracked_objects: list, model: YOLO) -> None:
         text_x, text_y = bbox[0], bbox[1]
 
         # Draw label background
-        bg_rect = plt.Rectangle((text_x, text_y - 12), 150, 16,
-                                color='black', alpha=0.5)
+        bg_rect = plt.Rectangle((text_x, text_y - 12), 150, 16, color="black", alpha=0.5)
         ax.add_patch(bg_rect)
 
         # Draw label text
-        plt.text(text_x, text_y, text, color=LABEL_TEXT_COLOR,
-                 fontsize=10, verticalalignment="bottom")
+        plt.text(
+            text_x, text_y, text, color=LABEL_TEXT_COLOR, fontsize=10, verticalalignment="bottom"
+        )
 
     plt.axis("off")
     plt.tight_layout()
@@ -110,7 +115,9 @@ def detect_and_track(model: YOLO, image_path: Path, tracker: DeepSort) -> None:
     plot_detections(img, tracked_objects, model)
 
 
-def process_video(image_dir: Path, output_path: Path, model: YOLO, tracker: DeepSort, fps: int = FPS) -> None:
+def process_video(
+    image_dir: Path, output_path: Path, model: YOLO, tracker: DeepSort, fps: int = FPS
+) -> None:
     """
     Process a directory of images to perform object detection and tracking,
     then compile the results into a video.
@@ -161,18 +168,32 @@ def process_video(image_dir: Path, output_path: Path, model: YOLO, tracker: Deep
             track_id = obj.track_id
             bbox = obj.to_ltwh()
             class_id = obj.get_det_class()
-            label = model.names[class_id] if class_id is not None and class_id < len(model.names) else "unknown"
+            label = (
+                model.names[class_id]
+                if class_id is not None and class_id < len(model.names)
+                else "unknown"
+            )
 
             # Draw bounding box
-            cv2.rectangle(img,
-                          (int(bbox[0]), int(bbox[1])),
-                          (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3])),
-                          (0, 255, 0), 2)
+            cv2.rectangle(
+                img,
+                (int(bbox[0]), int(bbox[1])),
+                (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3])),
+                (0, 255, 0),
+                2,
+            )
 
             # Draw label
             text = f"ID {track_id} - {label}"
-            cv2.putText(img, text, (int(bbox[0]), int(bbox[1]) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(
+                img,
+                text,
+                (int(bbox[0]), int(bbox[1]) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 0),
+                2,
+            )
 
         video_writer.write(img)
 
@@ -217,7 +238,9 @@ def main():
 
         # Define directories
         current_dir = Path(__file__).parent.parent.parent
-        image_directory = current_dir / "data" / "34759_final_project_raw" / "seq_01" / "image_02" / "data"
+        image_directory = (
+            current_dir / "data" / "34759_final_project_raw" / "seq_01" / "image_02" / "data"
+        )
         output_video_path = current_dir / "models" / "yolov8" / "output" / "tracked_output.mp4"
 
         # Initialize DeepSort tracker
