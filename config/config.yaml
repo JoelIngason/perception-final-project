@@ -3,12 +3,13 @@ data:
   raw_sequences_path: "../data/34759_final_project_raw/sequences/"
   rect_sequences_path: "../data/34759_final_project_rect/sequences/"
   calibration_file: "../data/34759_final_project_raw/calibration/calib_cam_to_cam.txt"
+  calibration_images_path: "../data/34759_final_project_raw/calib/"
   rectified_images_path: "../data/34759_final_project_rect/rectified_images/"
   labels_path: "../data/34759_final_project_raw/labels/"
 
 calibration:
-  chessboard_size: [9, 6]
-  square_size: 0.025  # in meters
+  chessboard_size: [7, 5]
+  square_size: 0.0995  # in meters
 
 detection:
   model: "yolov5"

@@ -3,20 +3,20 @@ import argparse
 
 import yaml
 
-from src.calibration.rectification import Rectifier
+""" from src.calibration.rectification import Rectifier """
 from src.calibration.stereo_calibration import StereoCalibrator
-from src.classification.classifier import Classifier
+""" from src.classification.classifier import Classifier
 from src.data_loader.dataset import DataLoader
 from src.detection.object_detector import ObjectDetector
 from src.evaluation.evaluator import Evaluator
 from src.tracking.object_tracker import ObjectTracker
 from src.utils.logger import setup_logger
-from src.visualization.visualizer import Visualizer
+from src.visualization.visualizer import Visualizer """
 
 
 def main(config_path):
     # Load configuration
-    with open(config_path) as file:
+    """ with open(config_path) as file:
         config = yaml.safe_load(file)
 
     # Setup logger
@@ -24,20 +24,20 @@ def main(config_path):
     logger.info("Starting Autonomous Perception Pipeline")
 
     # Initialize components
-    data_loader = DataLoader(config['data'])
+    data_loader = DataLoader(config['data']) """
     calibrator = StereoCalibrator(config['calibration'])
 
-    detector = ObjectDetector(config['detection'])
+    """ detector = ObjectDetector(config['detection'])
     tracker = ObjectTracker(config['tracking'])
     classifier = Classifier(config['classification'])
     evaluator = Evaluator()
-    visualizer = Visualizer()
+    visualizer = Visualizer() """
 
-    calibration_file = config['calibration']['calibration_file']
+    calibration_images = config['data']['calibration_images_path']
     # Load and calibrate data
-    calib_params = calibrator.calibrate(calibration_file)
+    calib_params = calibrator.calibrate(calibration_images)
     # Load and rectify data
-    use_rectified = config['processing']['use_rectified_data']
+    """ use_rectified = config['processing']['use_rectified_data']
     data = None
     rectifier = Rectifier(calib_params)
     if use_rectified:
@@ -58,7 +58,7 @@ def main(config_path):
 
     # Final Evaluation
     evaluator.report()
-    logger.info("Autonomous Perception Pipeline Completed")
+    logger.info("Autonomous Perception Pipeline Completed") """
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Autonomous Perception Pipeline")
