@@ -111,7 +111,7 @@ if ! conda_initialized; then
 fi
 
 # Define the environment name
-ENV_NAME="perception-final-project"
+ENV_NAME="perception"
 
 # Check if the environment already exists
 if conda env list | grep -q "^${ENV_NAME}[[:space:]]"; then
