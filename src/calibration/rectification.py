@@ -4,28 +4,29 @@ import cv2
 import numpy as np
 from cv2.typing import MatLike  # Import MatLike for type annotations
 
-from src.data_loader.dataset import Frame  # Ensure correct import path
+from src.data_loader.dataset import Frame
 
 
 class Rectifier:
-    def __init__(self, calibration_params: dict[str, np.ndarray]):
+    """Rectify stereo image pairs using calibration parameters."""
+
+    def __init__(self, calibration_params: dict[str, np.ndarray]) -> None:
         """
         Initialize the Rectifier with calibration parameters.
 
         Args:
-            calibration_params (dict[str, np.ndarray]): Dictionary containing calibration matrices and parameters.
+            calibration_params (Dict[str, np.ndarray]): Dictionary containing calibration matrices
+                and parameters.
 
         """
         self.calibration_params = calibration_params
         self.logger = logging.getLogger("autonomous_perception.calibration")
-
-        # Configure logger if not already configured
+        self.logger.setLevel(logging.INFO)
         if not self.logger.hasHandlers():
             handler = logging.StreamHandler()
             formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
 
         # Compute rectification maps during initialization
         self.left_map1, self.left_map2, self.right_map1, self.right_map2 = (
@@ -37,7 +38,8 @@ class Rectifier:
         Compute rectification maps for left and right images.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: Rectification maps for left and right images.
+            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: Rectification maps for left
+                and right images.
 
         """
         try:
@@ -54,10 +56,7 @@ class Rectifier:
             self.logger.info("Computing rectification maps")
 
             # Define image size (width, height)
-            image_size = (
-                int(S_rect_02[0]),
-                int(S_rect_02[1]),
-            )
+            image_size = (int(S_rect_02[0]), int(S_rect_02[1]))
 
             # Compute rectification maps for left image
             left_map1, left_map2 = cv2.initUndistortRectifyMap(
@@ -80,19 +79,16 @@ class Rectifier:
             )
 
             self.logger.info("Rectification maps computed successfully")
+        except KeyError:
+            self.logger.exception("Missing calibration parameters for rectification")
+            raise
+        except Exception:
+            self.logger.exception("Error during rectification map computation")
+            raise
+        else:
             return left_map1, left_map2, right_map1, right_map2
-        except KeyError as e:
-            self.logger.error(f"Missing calibration parameter: {e}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Error computing rectification maps: {e}")
-            raise
 
-    def rectify_images(
-        self,
-        img_left: MatLike,
-        img_right: MatLike,
-    ) -> tuple[MatLike, MatLike]:
+    def rectify_images(self, img_left: MatLike, img_right: MatLike) -> tuple[MatLike, MatLike]:
         """
         Rectify a pair of left and right images.
 
@@ -122,40 +118,46 @@ class Rectifier:
                 borderMode=cv2.BORDER_CONSTANT,
                 borderValue=(0, 0, 0),  # Black border
             )
-            return rectified_left, rectified_right
-        except Exception as e:
-            self.logger.error(f"Error during image rectification: {e}")
+        except Exception:
+            self.logger.exception("Error during image rectification")
             raise
+        else:
+            return rectified_left, rectified_right
 
-    def rectify_data(self, frames: list[Frame]) -> list[Frame]:
+    def rectify_data(self, frames: dict[str, list[Frame]]) -> dict[str, list[Frame]]:
         """
-        Rectify a list of Frame objects containing raw images.
+        Rectify a dictionary of Frame objects containing raw images.
 
         Args:
-            frames (List[Frame]): List of Frame objects with raw left and right images.
+            frames (Dict[str, list[Frame]]): Dictionary of sequences with Frame objects.
 
         Returns:
-            List[Frame]: List of Frame objects with rectified left and right images.
+            Dict[str, list[Frame]]: Dictionary with rectified Frame objects.
 
         """
-        self.logger.info(f"Rectifying {len(frames)} frames")
-        rectified_frames = []
-        for idx, frame in enumerate(frames, 1):
-            try:
-                rectified_left, rectified_right = self.rectify_images(
-                    frame.images[0],
-                    frame.images[1],
-                )
-                rectified_frame = Frame(
-                    image_left=rectified_left,
-                    image_right=rectified_right,
-                    timestamp=frame.timestamp,
-                    labels=frame.labels,
-                )
-                rectified_frames.append(rectified_frame)
-                self.logger.debug(f"Rectified frame {idx}/{len(frames)}")
-            except Exception as e:
-                self.logger.error(f"Failed to rectify frame {idx}: {e}")
-                continue
-        self.logger.info(f"Rectified {len(rectified_frames)} out of {len(frames)} frames")
+        self.logger.info(f"Rectifying {len(frames)} sequences")
+        rectified_frames = {}
+        for seq_id, frame_list in frames.items():
+            rectified_seq = []
+            for idx, frame in enumerate(frame_list):
+                try:
+                    rectified_left, rectified_right = self.rectify_images(
+                        frame.images[0],
+                        frame.images[1],
+                    )
+                    rectified_frame = Frame(
+                        image_left=rectified_left,
+                        image_right=rectified_right,
+                        timestamp=frame.timestamp,
+                        labels=frame.labels,
+                    )
+                    rectified_seq.append(rectified_frame)
+                    self.logger.debug(
+                        f"Rectified frame {idx}/{len(frame_list)} in sequence {seq_id}",
+                    )
+                except Exception:
+                    self.logger.exception(f"Failed to rectify frame {idx} in sequence {seq_id}")
+                    continue
+            rectified_frames[seq_id] = rectified_seq
+            self.logger.info(f"Rectified {len(rectified_seq)} frames in sequence {seq_id}")
         return rectified_frames
