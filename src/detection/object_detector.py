@@ -64,7 +64,7 @@ class ObjectDetector:
         # Load YOLO model
         model_path = config["detection"]["classification"].get(
             "model_path",
-            "src/models/yolov8/yolov8.pt",
+            "src/models/yolov8/yolov8n.pt",
         )
         self.model = load_model(model_path)
         self.model.conf = self.conf_threshold  # Set confidence threshold
@@ -74,27 +74,30 @@ class ObjectDetector:
         # Initialize DeepSort tracker
         tracking_config = config.get("tracking", {})
         self.tracker = DeepSort(
-            max_age=tracking_config.get("max_age", 30),
-            n_init=tracking_config.get("min_hits", 3),
-            nn_budget=100,
+            max_age=tracking_config.get(
+                "max_age",
+                60,
+            ),  # Increased max_age for better occlusion handling
+            n_init=tracking_config.get("n_init", 5),  # Increased n_init to confirm tracks
+            nn_budget=tracking_config.get(
+                "nn_budget",
+                200,
+            ),  # Increased nn_budget for better appearance matching
         )
-        self.logger.info("DeepSort tracker initialized successfully")
+        self.logger.info("DeepSort tracker initialized")
 
         # Calibration parameters
         self.calib_params = calib_params
 
-        # Correctly compute focal length and baseline from rectified projection matrices
+        # Compute focal length and baseline from rectified projection matrices
         try:
             P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
             P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
-
             self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
-            self.logger.info(f"Focal length set to {self.focal_length}")
-
-            # Compute baseline from projection matrices
             Tx_left = P_rect_02[0, 3]
             Tx_right = P_rect_03[0, 3]
             self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
+            self.logger.info(f"Focal length set to {self.focal_length}")
             self.logger.info(f"Baseline set to {self.baseline} meters")
         except KeyError:
             self.logger.exception("Error computing focal length and baseline.")
@@ -102,6 +105,27 @@ class ObjectDetector:
         except Exception:
             self.logger.exception("Error initializing ObjectDetector.")
             raise
+
+        # Initialize StereoSGBM matcher with improved parameters
+        self.stereo_matcher = cv2.StereoSGBM.create(
+            minDisparity=0,
+            numDisparities=128,  # Increased for better depth resolution
+            blockSize=7,  # Increased block size for smoother disparity
+            P1=8 * 3 * 7**2,
+            P2=32 * 3 * 7**2,
+            disp12MaxDiff=1,
+            uniquenessRatio=15,  # Increased to reduce false matches
+            speckleWindowSize=100,
+            speckleRange=32,
+            preFilterCap=63,
+            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        )
+        self.logger.info("StereoSGBM matcher initialized with improved parameters")
+
+        # Initialize WLS Filter for disparity map refinement
+        self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(matcher_left=self.stereo_matcher)
+        self.wls_filter.setLambda(8000)  # Increased lambda for smoother disparity
+        self.wls_filter.setSigmaColor(1.5)  # Adjusted sigmaColor for edge-preserving
 
     def detect_and_track(
         self,
@@ -209,27 +233,30 @@ class ObjectDetector:
         gray_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
         gray_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
 
-        # Initialize StereoSGBM matcher with updated parameters if needed
-        window_size = 5
-        min_disp = 0
-        num_disp = 16 * 6  # Must be divisible by 16
-        stereo = cv2.StereoSGBM.create(
-            minDisparity=min_disp,
-            numDisparities=num_disp,
-            blockSize=window_size,
-            P1=8 * 3 * window_size**2,
-            P2=32 * 3 * window_size**2,
-            disp12MaxDiff=1,
-            uniquenessRatio=10,
-            speckleWindowSize=100,
-            speckleRange=32,
-            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,  # Enhanced mode for better disparity
+        # Compute disparity using StereoSGBM
+        disparity_left = (
+            self.stereo_matcher.compute(gray_left, gray_right).astype(np.float32) / 16.0
         )
+        self.logger.debug("Left disparity map computed.")
 
-        # Compute disparity map
-        disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0
-        self.logger.debug("Disparity map computed.")
-        return disparity
+        # Compute disparity for right image
+        stereo_matcher_right = cv2.ximgproc.createRightMatcher(self.stereo_matcher)
+        disparity_right = (
+            stereo_matcher_right.compute(gray_right, gray_left).astype(np.float32) / 16.0
+        )
+        self.logger.debug("Right disparity map computed.")
+
+        # Apply WLS filter to refine disparity map
+        disparity_filtered = self.wls_filter.filter(
+            disparity_left,
+            img_left,
+            disparity_map_right=disparity_right,
+        )
+        self.logger.debug("Disparity map filtered using WLS filter.")
+
+        # Replace negative disparities with zero
+        disparity_filtered[disparity_filtered < 0] = 0
+        return disparity_filtered
 
     def _get_center(self, bbox: list[float]) -> tuple[float, float]:
         """
@@ -264,17 +291,14 @@ class ObjectDetector:
         detections_for_tracker = []
         for det in detections:
             x1, y1, x2, y2 = det.bbox
-            bbox = [x1, y1, x2 - x1, y2 - y1]
+            bbox = [x1, y1, x2 - x1, y2 - y1]  # [left, top, width, height]
             confidence = det.confidence
-            class_name = det.class_id
-            # raw_detections : List[ Tuple[ List[float or int], float, str ] ] List of detections,
-            # each in tuples of ( [left,top,w,h] , confidence, detection_class)
-            detections_for_tracker.append((bbox, confidence, class_name))
+            class_id = det.class_id
+            detections_for_tracker.append((bbox, confidence, class_id))
 
-        # Optional: Debug log to verify detections format
         self.logger.debug(f"detections_for_tracker: {detections_for_tracker}")
 
-        # Update tracker
+        # Update tracker with detections
         try:
             tracks = self.tracker.update_tracks(detections_for_tracker, frame=frame)
         except Exception:
@@ -286,26 +310,28 @@ class ObjectDetector:
             if not track.is_confirmed():
                 continue
             track_id = track.track_id
-            bbox = track.to_ltwh()  # [x, y, w, h]
+            bbox = track.to_ltwh()  # [left, top, width, height]
             class_id = track.get_det_class()
             label = (
                 self.model.names[class_id] if 0 <= class_id < len(self.model.names) else "unknown"
             )
 
-            # Find the detection that matches this track
-            position_3d = (0.0, 0.0, 0.0)
-            min_distance = float("inf")
+            # Retrieve 3D position from the latest detection
+            # Assuming that detections are ordered, and the last matched detection has the
+            # most recent position
+            matched_detection = None
             for det in detections:
                 det_center = self._get_center(det.bbox)
                 track_center = (bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2)
                 distance = np.linalg.norm(np.array(det_center) - np.array(track_center))
-                if distance < min_distance:
-                    min_distance = distance
-                    position_3d = det.position_3d
+                if distance < float("inf"):  # Threshold for matching (pixels)
+                    matched_detection = det
+                    break
+            position_3d = matched_detection.position_3d if matched_detection else (0.0, 0.0, 0.0)
 
             tracked_object = TrackedObject(
                 track_id=track_id,
-                bbox=bbox,
+                bbox=[int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
                 class_id=class_id,
                 label=label,
                 position_3d=position_3d,

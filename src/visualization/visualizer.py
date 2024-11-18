@@ -42,29 +42,7 @@ class Visualizer:
         img_display = img_left.copy()
 
         # Compute the full depth map from the disparity map
-        P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
-        P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
-
-        self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
-        self.logger.info(f"Focal length set to {self.focal_length}")
-
-        # Compute baseline from projection matrices
-        Tx_left = P_rect_02[0, 3]
-        Tx_right = P_rect_03[0, 3]
-        self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
-        depth_map = self.compute_depth_map(
-            disparity_map,
-            self.focal_length,
-            self.baseline,
-        )
-
-        # Debugging: Log depth_map statistics before normalization
-        min_depth = np.min(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
-        max_depth = np.max(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
-        mean_depth = np.mean(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
-        self.logger.debug(
-            f"Depth Map Stats - Min: {min_depth:.2f}m, Max: {max_depth:.2f}m, Mean: {mean_depth:.2f}m",
-        )
+        depth_map = self.compute_depth_map(disparity_map, calib_params)
 
         # Normalize the depth map for visualization
         depth_map_normalized = self.normalize_depth_map(depth_map)
@@ -120,14 +98,11 @@ class Visualizer:
                 cv2.LINE_AA,
             )
 
-        # Overlay the depth heatmap and the display image
+        # Overlay the depth heatmap and the display image combined_visualization
         combined_visualization = self._stack_images_vertically(img_display, depth_heatmap)
 
         # Display the combined visualization
-        cv2.imshow(
-            "Autonomous Perception - 2D and Depth Visualization",
-            combined_visualization,
-        )
+        cv2.imshow("Autonomous Perception - 2D and Depth Visualization", combined_visualization)
 
         # Wait for a short period; allow exit with 'q' key
         key = cv2.waitKey(1) & 0xFF
@@ -138,26 +113,29 @@ class Visualizer:
     def compute_depth_map(
         self,
         disparity_map: np.ndarray,
-        focal_length: float,
-        baseline: float,
+        calib_params: dict[str, np.ndarray],
     ) -> np.ndarray:
         """
         Compute the depth map from disparity map using the formula depth = f * B / disparity.
 
         Args:
-            disparity_map (np.ndarray): Disparity map.
-            focal_length (float): Focal length (in pixels).
-            baseline (float): Baseline (in meters).
+            disparity_map (np.ndarray): Disparity map of the current frame.
+            calib_params (Dict[str, np.ndarray]): Dictionary containing calibration parameters.
 
         Returns:
-            np.ndarray: Depth map with depth in meters.
+            np.ndarray: Depth map computed from disparity map.
 
         """
-        with np.errstate(
-            divide="ignore",
-            invalid="ignore",
-        ):  # Handle division by zero and invalid values
-            depth_map = (focal_length * baseline) / disparity_map
+        with np.errstate(divide="ignore", invalid="ignore"):
+            P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
+            P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
+
+            self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
+            # Compute baseline from projection matrices
+            Tx_left = P_rect_02[0, 3]
+            Tx_right = P_rect_03[0, 3]
+            self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
+            depth_map = (self.focal_length * self.baseline) / disparity_map
             depth_map[disparity_map <= 0] = 0  # Assign zero depth where disparity is invalid
         return depth_map
 
@@ -172,12 +150,10 @@ class Visualizer:
             np.ndarray: Normalized depth map as an 8-bit image.
 
         """
-        # Mask invalid depth values
         valid_mask = depth_map > 0
         if np.any(valid_mask):
             min_val = np.min(depth_map[valid_mask])
             max_val = np.max(depth_map[valid_mask])
-            # Avoid division by zero if min_val == max_val
             if max_val - min_val > 1e-3:
                 depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
                 depth_map_normalized[valid_mask] = np.clip(
@@ -204,12 +180,9 @@ class Visualizer:
             np.ndarray: Combined image stacked vertically.
 
         """
-        # Ensure both images have the same width
         height_top, width_top = img_top.shape[:2]
         height_bottom, width_bottom = img_bottom.shape[:2]
-
         if width_top != width_bottom:
-            # Resize bottom image to match top image's width
             scaling_factor = width_top / width_bottom
             new_height = int(height_bottom * scaling_factor)
             img_bottom_resized = cv2.resize(
