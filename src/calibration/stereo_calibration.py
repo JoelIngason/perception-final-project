@@ -1,77 +1,154 @@
 import logging
 
 import numpy as np
-import glob
-import os
-import cv2
 
 
 class StereoCalibrator:
-    def __init__(self, config):
-        self.chessboard_size = tuple(config['chessboard_size'])
-        self.square_size = config['square_size']
-        self.logger = logging.getLogger('autonomous_perception.calibration')
+    def __init__(self, config: dict):
+        self.chessboard_size = tuple(config.get("chessboard_size", (9, 6)))  # Default size
+        self.square_size = config.get("square_size", 0.025)  # Default square size in meters
+        self.logger = logging.getLogger("autonomous_perception.calibration")
 
+        # Configure logger if not already configured
+        if not self.logger.hasHandlers():
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
 
-    def calibrate(self, calibration_images):
+    def calibrate(self, calibration_file: str) -> dict[str, np.ndarray]:
+        """
+        Perform stereo calibration by loading calibration parameters from a file.
+
+        Args:
+            calibration_file (str): Path to the calibration parameters file.
+
+        Returns:
+            Dict[str, np.ndarray]: Dictionary containing calibration parameters.
+
+        """
         self.logger.info("Starting stereo calibration")
+        try:
+            # Load calibration parameters from file
+            calib_params = self._load_calibration_file(calibration_file)
 
-        # Prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-        objp = np.zeros((self.chessboard_size[0] * self.chessboard_size[1], 3), np.float32)
-        objp[:, :2] = np.mgrid[0:self.chessboard_size[0], 0:self.chessboard_size[1]].T.reshape(-1, 2)
+            # Validate essential calibration parameters
+            required_keys = {
+                "K_02",
+                "K_03",
+                "D_02",
+                "D_03",
+                "R_02",
+                "T_02",
+                "R_rect_02",
+                "P_rect_02",
+                "P_rect_03",
+                "S_rect_02",
+            }
+            missing_keys = required_keys - calib_params.keys()
+            if missing_keys:
+                self.logger.error(f"Missing calibration parameters: {missing_keys}")
+                raise KeyError(f"Missing calibration parameters: {missing_keys}")
 
-        # Separate lists for object points and image points for each camera
-        objpoints_left = []  # 3d points in real world space for the left camera
-        objpoints_right = []  # 3d points in real world space for the right camera
-        imgpoints_left = []   # 2d points in the left camera image plane
-        imgpoints_right = []  # 2d points in the right camera image plane
+            self.logger.info("Stereo calibration completed successfully")
+            return calib_params
+        except Exception as e:
+            self.logger.error(f"Stereo calibration failed: {e}")
+            raise
 
-        # Loop over left (image_02) and right (image_03) folders, with separate lists
-        for folder, objpoints, imgpoints in zip(
-            ['image_02', 'image_03'],
-            [objpoints_left, objpoints_right],
-            [imgpoints_left, imgpoints_right]
-        ):
-            image_path = os.path.join(calibration_images, folder, '*')
-            images = glob.glob(image_path)
+    def _load_calibration_file(self, filepath: str) -> dict[str, np.ndarray]:
+        """
+        Load calibration parameters from a text file.
 
-            # Process each image in the folder
-            for fname in images:
-                img = cv2.imread(fname)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        Args:
+            filepath (str): Path to the calibration file.
 
-                # Find chessboard corners
-                ret, corners = cv2.findChessboardCorners(gray, (self.chessboard_size[0], self.chessboard_size[1]))
+        Returns:
+            Dict[str, np.ndarray]: Dictionary containing calibration parameters.
 
-                # If found, add object points and image points to the correct lists
-                if ret:
-                    objpoints.append(objp)  
-                    imgpoints.append(corners)
+        """
+        calib_params = {}
+        try:
+            with open(filepath) as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line or ":" not in line:
+                        self.logger.debug(
+                            f"Skipping line {line_num}: Invalid format or empty line.",
+                        )
+                        continue
+                    key, value = line.split(":", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if not value:
+                        self.logger.warning(
+                            f"Line {line_num}: No values found for key '{key}'. Skipping.",
+                        )
+                        continue
 
-                    # Draw and display the corners
-                    img = cv2.drawChessboardCorners(img, (self.chessboard_size[0], self.chessboard_size[1]), corners, ret)
-                    plt.imshow(img)
-                    plt.show()
+                    # Handle specific keys
+                    if key == "calib_time":
+                        self.logger.info(f"Line {line_num}: Calibration time '{value}' ignored.")
+                        continue  # Skip non-numeric calibration time
+                    if key == "corner_dist":
+                        try:
+                            calib_params[key] = float(value)
+                            self.logger.debug(f"Loaded {key} as float.")
+                        except ValueError as e:
+                            self.logger.error(
+                                f"Line {line_num}: Could not convert value to float for key '{key}': {e}",
+                            )
+                        continue
 
-        # Calibrate each camera separately
-        ret_left, mtx_left, dist_left, rvecs_left, tvecs_left = cv2.calibrateCamera(
-            objpoints_left, imgpoints_left, gray.shape[::-1], None, None
-        )
-        ret_right, mtx_right, dist_right, rvecs_right, tvecs_right = cv2.calibrateCamera(
-            objpoints_right, imgpoints_right, gray.shape[::-1], None, None
-        )
+                    try:
+                        values = list(map(float, value.split()))
+                    except ValueError as e:
+                        self.logger.error(
+                            f"Line {line_num}: Could not convert values to floats for key '{key}': {e}",
+                        )
+                        continue
 
-        # Calculate optimal camera matrix for undistortion
-        h, w = gray.shape[:2]
-        newcameramtx_left, roi_left = cv2.getOptimalNewCameraMatrix(mtx_left, dist_left, (w, h), 1, (w, h))
-        newcameramtx_right, roi_right = cv2.getOptimalNewCameraMatrix(mtx_right, dist_right, (w, h), 1, (w, h))
+                    # Handle matrix and vector keys
+                    if key.startswith("K_") or key.startswith("R_") or key.startswith("P_"):
+                        if len(values) == 9:
+                            calib_params[key] = np.array(values).reshape((3, 3))
+                            self.logger.debug(f"Loaded {key} as 3x3 matrix.")
+                        elif len(values) == 12 and key.startswith("P_"):
+                            calib_params[key] = np.array(values).reshape((3, 4))
+                            self.logger.debug(f"Loaded {key} as 3x4 projection matrix.")
+                        else:
+                            self.logger.warning(
+                                f"Key '{key}' has unexpected number of values ({len(values)}). Skipping.",
+                            )
+                    elif key.startswith("D_"):
+                        calib_params[key] = np.array(values)
+                        self.logger.debug(
+                            f"Loaded {key} as distortion coefficients: {calib_params[key]}",
+                        )
+                    elif key.startswith("T_"):
+                        if len(values) == 3:
+                            calib_params[key] = np.array(values).reshape((3, 1))
+                            self.logger.debug(
+                                f"Loaded {key} as 3x1 translation vector: {calib_params[key]}",
+                            )
+                        else:
+                            self.logger.warning(
+                                f"Key '{key}' has unexpected number of values ({len(values)}). Expected 3 for T_. Skipping.",
+                            )
+                    elif key.startswith("S_") or key.startswith("R_rect_"):
+                        calib_params[key] = np.array(values)
+                        self.logger.debug(f"Loaded {key} as 1D array.")
+                    else:
+                        self.logger.warning(
+                            f"Unrecognized key '{key}' at line {line_num}. Skipping.",
+                        )
+        except FileNotFoundError:
+            self.logger.error(f"Calibration file not found: {filepath}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Unexpected error while loading calibration file: {e}")
+            raise
 
-        self.logger.info("Stereo calibration completed")
-        
-        return {
-            "left_camera": {"matrix": mtx_left, "distortion": dist_left, "rvecs": rvecs_left, "tvecs": tvecs_left},
-            "right_camera": {"matrix": mtx_right, "distortion": dist_right, "rvecs": rvecs_right, "tvecs": tvecs_right},
-        }
-
-        
- 
+        self.logger.debug(f"Loaded calibration parameters: {list(calib_params.keys())}")
+        return calib_params

@@ -1,18 +1,17 @@
 # config/config.yaml
 data:
-  raw_sequences_path: "../data/34759_final_project_raw/sequences/"
-  rect_sequences_path: "../data/34759_final_project_rect/sequences/"
-  calibration_file: "../data/34759_final_project_raw/calibration/calib_cam_to_cam.txt"
-  calibration_images_path: "../data/34759_final_project_raw/calib/"
-  rectified_images_path: "../data/34759_final_project_rect/rectified_images/"
-  labels_path: "../data/34759_final_project_raw/labels/"
+  raw_sequences_path: ["data/34759_final_project_raw/seq_01/", "data/34759_final_project_raw/seq_02/", "data/34759_final_project_raw/seq_03/"]
+  rect_sequences_path: ["data/34759_final_project_rect/seq_01/", "data/34759_final_project_rect/seq_02/", "data/34759_final_project_rect/seq_03/"]
+  calibration_file: "data/34759_final_project_raw/calib_cam_to_cam.txt"
+  rectified_images_path: "data/34759_final_project_rect/rectified_images/"
 
 calibration:
-  chessboard_size: [7, 5]
-  square_size: 0.0995  # in meters
+  chessboard_size: [9, 6]
+  square_size: 0.025  # in meters
+  calibration_file_rect: "data/34759_final_project_rect/calib_cam_to_cam.txt"
 
 detection:
-  model: "yolov5"
+  model: "yolov8"
   confidence_threshold: 0.5
   nms_threshold: 0.4
 
@@ -22,11 +21,11 @@ tracking:
   min_hits: 3
 
 classification:
-  model_path: "../models/classifier.pth"
+  model_path: "src/models/yolov8/yolov8.pt" # Remember to change this path based on your model
   input_size: 224
 
 logging:
-  config_file: "logging.yaml"
+  config_file: "config/logging.yaml"
   
 processing:
   use_rectified_data: true  # Set to false to process raw data

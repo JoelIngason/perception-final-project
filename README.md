@@ -10,9 +10,6 @@ This README provides information about the raw data provided for the project, in
 - [Labels Description](#labels-description)
 - [Calibration](#calibration)
 - [Important Notes](#important-notes)
-- [Usage](#usage)
-- [License](#license)
-- [Contact](#contact)
 
 ## Project Overview
 
@@ -30,51 +27,49 @@ Within the `34759_final_project_raw` folder, you will find the following:
 ```
 34759_final_project_raw/
 ├── sequences/
-│   ├── seq_1/
-│   ├── seq_2/
-│   └── seq_3/
-├── calibration/
-│   ├── calib_cam_to_cam.txt
-│   └── calibration_patterns/
-│       └── pattern_image.png
-└── labels/
-    ├── labels_seq_1.txt
-    ├── labels_seq_2.txt
-    └── labels_seq_3.txt  # Note: Labels for seq_3 are not provided
-```
+├── seq_01/
+│   ├── image_02/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+│   ├── image_03/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+│   └── labels.txt
+├── seq_02/
+│   ├── image_02/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+│   ├── image_03/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+│   └── labels.txt
+├── seq_03/
+│   ├── image_02/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+│   ├── image_03/
+│   │   └── data/
+│   │       └── <image_seq_no>.png
+│   │   └── timestamps.txt
+└── calib/
+    ├── image_02/
+    │   └── data/
+    │       └── <calib_seq_no>.png
+    │   └── timestamps.txt
+    └── image_03/
+        └── data/
+            └── <calib_seq_no>.png
+        └── timestamps.txt
+
 
 ## Data Format
 
-Each **sequence folder** (`seq_<n>/`) follows the structure below:
-
-```
-seq_<n>/
-├── image02/
-│   ├── data/
-│   │   └── <image_seq_no>.png
-│   └── timestamps.txt
-└── image03/
-    ├── data/
-    │   └── <image_seq_no>.png
-    └── timestamps.txt
-```
-
-- **image02/data/**: Contains the left color camera sequence images in PNG format.
-- **image02/timestamps.txt**: Lists the timestamps for each left image. Each line corresponds to the respective image sequence number.
-- **image03/data/**: Contains the right color camera sequence images in PNG format.
-- **image03/timestamps.txt**: Lists the timestamps for each right image. Each line corresponds to the respective image sequence number.
-
-### Detailed Description
-
-- **Left and Right Images**: 
-  - `image02/data/` stores images from the left camera.
-  - `image03/data/` stores images from the right camera.
-  
-- **Timestamps**:
-  - `image02/timestamps.txt` and `image03/timestamps.txt` provide synchronization information between image pairs.
-
-- **Labels**:
-  - `labels.txt` files are provided for sequences 1 and 2, containing ground truth annotations. **No labels are provided for sequence 3**.
+The raw data is structured into three sequences (`seq_01`, `seq_02`, `seq_03`) and a calibration sequence (`calib`). Each sequence contains left and right camera images, along with corresponding timestamps and labels. The calibration sequence includes images for calibrating the stereo camera system.
 
 ## Labels Description
 
