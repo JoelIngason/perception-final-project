@@ -225,7 +225,7 @@ class DataLoader:
                             dt_str = f"{dt_str}.{micro}"
                         else:
                             dt_str = f"{line}.000000"
-                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S.%f%z")
+                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S.%f")  # noqa: DTZ007
                         timestamp = dt.timestamp()
                         timestamps.append(timestamp)
                     except ValueError:
