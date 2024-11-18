@@ -12,7 +12,7 @@ from src.utils.logger import setup_logger
 from src.visualization.visualizer import Visualizer
 
 
-def main(config_path: str) -> None:
+def main(config_path: str) -> None:  # noqa: C901, PLR0915
     """
     Execute the Autonomous Perception Pipeline.
 
@@ -78,20 +78,31 @@ def main(config_path: str) -> None:
         for seq_id, frames in data.items():
             logger.info(f"Processing sequence {seq_id} with {len(frames)} frames.")
             for frame in frames:
-                detections, tracked_objects, disparity_map = detector.detect_and_track(frame.images)
-                evaluator.evaluate(tracked_objects, frame.labels)
-                visualizer.display(frame, tracked_objects, disparity_map)
+                try:
+                    # Perform detection and tracking
+                    detections, tracked_objects, disparity_map = detector.detect_and_track(
+                        frame.images,
+                    )
+
+                    # Evaluate
+                    evaluator.evaluate(tracked_objects, frame.labels)
+
+                    # Visualize
+                    visualizer.display(frame, tracked_objects, disparity_map, calib_params)
+                except Exception:
+                    logger.exception("Error processing frame")
+                    continue
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user. Exiting...")
-    except Exception:
+    except Exception as e:
         logger.exception("Unexpected error during processing")
     finally:
         # Final Evaluation
         try:
             evaluator.report()
             logger.info("Evaluator reported successfully")
-        except Exception as e:
-            logger.exception(f"Failed to generate evaluation report: {e}")
+        except Exception:
+            logger.exception("Failed to generate evaluation report")
         # Ensure all OpenCV windows are closed
         cv2.destroyAllWindows()
         logger.info("Autonomous Perception Pipeline Completed")

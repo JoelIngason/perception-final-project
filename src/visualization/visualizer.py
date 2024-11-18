@@ -24,25 +24,55 @@ class Visualizer:
         frame: Frame,
         tracked_objects: list[TrackedObject],
         disparity_map: np.ndarray,
+        calib_params: dict[str, np.ndarray],
     ) -> None:
         """
-        Display the frame with tracked objects and their 3D positions,along with a depth heatmap.
+        Display the frame with tracked objects and their 3D positions, along with a depth heatmap.
 
         Args:
             frame (Frame): Frame object containing rectified images and metadata.
             tracked_objects (List[TrackedObject]): List of tracked objects with 3D positions.
             disparity_map (np.ndarray): Disparity map of the current frame for depth visualization.
+            calib_params (Dict[str, np.ndarray]): Dictionary containing calibration parameters.
 
         """
-        img_left, img_right = frame.image_left, frame.image_right
+        img_left, img_right = frame.images
 
         # Create a copy of the left image to draw bounding boxes and labels
         img_display = img_left.copy()
 
-        # Initialize a blank depth map with the same dimensions as the left image
-        depth_map = np.zeros_like(img_left[:, :, 0], dtype=np.float32)
+        # Compute the full depth map from the disparity map
+        P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
+        P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
 
-        # Populate the depth map based on tracked objects
+        self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
+        self.logger.info(f"Focal length set to {self.focal_length}")
+
+        # Compute baseline from projection matrices
+        Tx_left = P_rect_02[0, 3]
+        Tx_right = P_rect_03[0, 3]
+        self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
+        depth_map = self.compute_depth_map(
+            disparity_map,
+            self.focal_length,
+            self.baseline,
+        )
+
+        # Debugging: Log depth_map statistics before normalization
+        min_depth = np.min(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
+        max_depth = np.max(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
+        mean_depth = np.mean(depth_map[np.isfinite(depth_map) & (depth_map > 0)])
+        self.logger.debug(
+            f"Depth Map Stats - Min: {min_depth:.2f}m, Max: {max_depth:.2f}m, Mean: {mean_depth:.2f}m",
+        )
+
+        # Normalize the depth map for visualization
+        depth_map_normalized = self.normalize_depth_map(depth_map)
+
+        # Apply a colormap to the normalized depth map to create a heatmap
+        depth_heatmap = cv2.applyColorMap(depth_map_normalized, cv2.COLORMAP_JET)
+
+        # Draw tracked objects on the display image
         for obj in tracked_objects:
             track_id = obj.track_id
             x, y, w, h = obj.bbox
@@ -90,68 +120,7 @@ class Visualizer:
                 cv2.LINE_AA,
             )
 
-        # Debugging: Log depth_map statistics before normalization
-        min_depth = depth_map.min()
-        max_depth = depth_map.max()
-        mean_depth = depth_map.mean()
-        self.logger.debug(
-            f"Depth Map Stats - Min: {min_depth:.2f}m, Max: {max_depth:.2f}m, Mean: {mean_depth:.2f}m",
-        )
-
-        # Normalize the depth map for visualization
-        if max_depth > 0:
-            # Define maximum expected depth for normalization (adjust as needed)
-            max_depth_visual = 50.0  # meters
-            depth_map_clipped = np.clip(depth_map, 0, max_depth_visual)
-            depth_map_normalized = (depth_map_clipped / max_depth_visual) * 255.0
-            depth_map_normalized = depth_map_normalized.astype(np.uint8)
-        else:
-            self.logger.warning("All depth values are zero. Creating a uniform depth heatmap.")
-            depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
-
-        # Apply a colormap to the normalized depth map to create a heatmap
-        depth_heatmap = cv2.applyColorMap(depth_map_normalized, cv2.COLORMAP_JET)
-
-        # Overlay labels on the depth heatmap
-        for obj in tracked_objects:
-            track_id = obj.track_id
-            x, y, w, h = obj.bbox
-            x1, y1, x2, y2 = int(x), int(y), int(x + w), int(y + h)
-            label = obj.label
-            position_3d = obj.position_3d  # (X, Y, Z) in meters
-
-            # Prepare label text with 3D position (only Z for depth heatmap)
-            text = f"ID {track_id} - {label} - Z: {position_3d[2]:.2f}m"
-
-            # Calculate position for text
-            text_position = (
-                x1,
-                y1 - TEXT_OFFSET if y1 - TEXT_OFFSET > TEXT_OFFSET else y1 + TEXT_OFFSET,
-            )
-
-            # Draw label background for better readability
-            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            cv2.rectangle(
-                depth_heatmap,
-                (text_position[0], text_position[1] - text_height - 5),
-                (text_position[0] + text_width, text_position[1] + 5),
-                (0, 0, 255),  # Red background for contrast
-                cv2.FILLED,
-            )
-
-            # Put text on the heatmap
-            cv2.putText(
-                depth_heatmap,
-                text,
-                text_position,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),  # White text for contrast
-                2,
-                cv2.LINE_AA,
-            )
-
-        # Combine the 2D image and the depth heatmap vertically
+        # Overlay the depth heatmap and the display image
         combined_visualization = self._stack_images_vertically(img_display, depth_heatmap)
 
         # Display the combined visualization
@@ -166,19 +135,62 @@ class Visualizer:
             self.logger.info("Exit key pressed. Closing visualization window.")
             cv2.destroyAllWindows()
 
-    def _get_center(self, bbox: list[int]) -> tuple[float, float]:
+    def compute_depth_map(
+        self,
+        disparity_map: np.ndarray,
+        focal_length: float,
+        baseline: float,
+    ) -> np.ndarray:
         """
-        Calculate the center of a bounding box.
+        Compute the depth map from disparity map using the formula depth = f * B / disparity.
 
         Args:
-            bbox (List[int]): Bounding box coordinates [x1, y1, x2, y2].
+            disparity_map (np.ndarray): Disparity map.
+            focal_length (float): Focal length (in pixels).
+            baseline (float): Baseline (in meters).
 
         Returns:
-            Tuple[float, float]: Center coordinates (x, y).
+            np.ndarray: Depth map with depth in meters.
 
         """
-        x1, y1, x2, y2 = bbox
-        return ((x1 + x2) / 2, (y1 + y2) / 2)
+        with np.errstate(
+            divide="ignore",
+            invalid="ignore",
+        ):  # Handle division by zero and invalid values
+            depth_map = (focal_length * baseline) / disparity_map
+            depth_map[disparity_map <= 0] = 0  # Assign zero depth where disparity is invalid
+        return depth_map
+
+    def normalize_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
+        """
+        Normalize the depth map for visualization.
+
+        Args:
+            depth_map (np.ndarray): Depth map with depth in meters.
+
+        Returns:
+            np.ndarray: Normalized depth map as an 8-bit image.
+
+        """
+        # Mask invalid depth values
+        valid_mask = depth_map > 0
+        if np.any(valid_mask):
+            min_val = np.min(depth_map[valid_mask])
+            max_val = np.max(depth_map[valid_mask])
+            # Avoid division by zero if min_val == max_val
+            if max_val - min_val > 1e-3:
+                depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
+                depth_map_normalized[valid_mask] = np.clip(
+                    255 * (depth_map[valid_mask] - min_val) / (max_val - min_val),
+                    0,
+                    255,
+                ).astype(np.uint8)
+            else:
+                depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
+        else:
+            self.logger.warning("No valid depth values found. Depth heatmap will be all zeros.")
+            depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
+        return depth_map_normalized
 
     def _stack_images_vertically(self, img_top: np.ndarray, img_bottom: np.ndarray) -> np.ndarray:
         """

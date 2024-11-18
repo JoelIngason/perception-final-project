@@ -82,8 +82,26 @@ class ObjectDetector:
 
         # Calibration parameters
         self.calib_params = calib_params
-        self.focal_length = calib_params["K_02"][0, 0]  # fx from left camera intrinsic matrix
-        self.baseline = np.linalg.norm(calib_params["T_02"])  # Baseline from translation vector
+
+        # Correctly compute focal length and baseline from rectified projection matrices
+        try:
+            P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
+            P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
+
+            self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
+            self.logger.info(f"Focal length set to {self.focal_length}")
+
+            # Compute baseline from projection matrices
+            Tx_left = P_rect_02[0, 3]
+            Tx_right = P_rect_03[0, 3]
+            self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
+            self.logger.info(f"Baseline set to {self.baseline} meters")
+        except KeyError:
+            self.logger.exception("Error computing focal length and baseline.")
+            raise
+        except Exception:
+            self.logger.exception("Error initializing ObjectDetector.")
+            raise
 
     def detect_and_track(
         self,
@@ -93,11 +111,11 @@ class ObjectDetector:
         Perform detection and tracking on the provided stereo images.
 
         Args:
-            images (Tuple[np.ndarray, np.ndarray]): A tuple containing left and right rectified
-                images.
+            images (Tuple[np.ndarray, np.ndarray]): A tuple containing left and right rectified images.
 
         Returns:
-            Tuple[List[DetectionResult], List[TrackedObject], np.ndarray]: Detected objects,
+            Tuple[List[DetectionResult], List[TrackedObject], np.ndarray]: Detections, tracked objects, and disparity map.
+
         """
         img_left, img_right = images
 
@@ -110,24 +128,23 @@ class ObjectDetector:
         # Enhance DetectionResults with accurate depth from disparity map
         for det in detections_left:
             center_x, center_y = self._get_center(det.bbox)
-            if (
-                center_y >= 0
-                and center_y < disparity_map.shape[0]
-                and center_x >= 0
-                and center_x < disparity_map.shape[1]
-            ):
+            if 0 <= center_y < disparity_map.shape[0] and 0 <= center_x < disparity_map.shape[1]:
                 disparity = disparity_map[int(center_y), int(center_x)]
                 if disparity > 0:
                     depth = self.focal_length * self.baseline / disparity
-                    X = (center_x - self.calib_params["K_02"][0, 2]) * depth / self.focal_length
-                    Y = (
-                        (center_y - self.calib_params["K_02"][1, 2])
+                    X = (
+                        (center_x - self.calib_params["P_rect_02"][0, 2])
                         * depth
-                        / self.calib_params["K_02"][1, 1]
+                        / self.focal_length
+                    )
+                    Y = (
+                        (center_y - self.calib_params["P_rect_02"][1, 2])
+                        * depth
+                        / self.calib_params["P_rect_02"][1, 1]
                     )
                     det.add_3d_position((X, Y, depth))
                     self.logger.debug(
-                        f"Detection at ({center_x}, {center_y}) has depth {depth:.2f}m",
+                        f"Detection ID {det.class_id} at ({center_x}, {center_y}) has depth {depth:.2f}m",
                     )
                 else:
                     self.logger.warning(
@@ -192,7 +209,7 @@ class ObjectDetector:
         gray_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
         gray_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
 
-        # Initialize StereoSGBM matcher
+        # Initialize StereoSGBM matcher with updated parameters if needed
         window_size = 5
         min_disp = 0
         num_disp = 16 * 6  # Must be divisible by 16
@@ -206,6 +223,7 @@ class ObjectDetector:
             uniquenessRatio=10,
             speckleWindowSize=100,
             speckleRange=32,
+            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,  # Enhanced mode for better disparity
         )
 
         # Compute disparity map
@@ -233,7 +251,7 @@ class ObjectDetector:
         frame: np.ndarray,
     ) -> list[TrackedObject]:
         """
-        Update DeepSort tracker with current detections and return tracked objects 3D positions.
+        Update DeepSort tracker with current detections and return tracked objects with 3D positions.
 
         Args:
             detections (List[DetectionResult]): Current frame detections with depth.
@@ -246,11 +264,23 @@ class ObjectDetector:
         detections_for_tracker = []
         for det in detections:
             x1, y1, x2, y2 = det.bbox
-            bbox = [x1, y1, x2 - x1, y2 - y1]  # Convert to [x, y, w, h]
+            bbox = [x1, y1, x2 - x1, y2 - y1]
             confidence = det.confidence
-            detections_for_tracker.append(([bbox, confidence, det.class_id]))
+            class_name = det.class_id
+            # raw_detections : List[ Tuple[ List[float or int], float, str ] ] List of detections,
+            # each in tuples of ( [left,top,w,h] , confidence, detection_class)
+            detections_for_tracker.append((bbox, confidence, class_name))
 
-        tracks = self.tracker.update_tracks(detections_for_tracker, frame=frame)
+        # Optional: Debug log to verify detections format
+        self.logger.debug(f"detections_for_tracker: {detections_for_tracker}")
+
+        # Update tracker
+        try:
+            tracks = self.tracker.update_tracks(detections_for_tracker, frame=frame)
+        except Exception:
+            self.logger.exception("Failed to update tracks with current detections.")
+            tracks = []
+
         tracked_objects = []
         for track in tracks:
             if not track.is_confirmed():
