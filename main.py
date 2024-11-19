@@ -48,7 +48,7 @@ def main(config_path: str) -> None:  # noqa: C901, PLR0915
 
     # Initialize other components
     evaluator = Evaluator()
-    visualizer = Visualizer()
+    visualizer = Visualizer(calib_params)
     rectifier = (
         Rectifier(calib_params)
         if not config["processing"].get("use_rectified_data", True)

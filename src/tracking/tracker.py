@@ -162,7 +162,9 @@ class ObjectTracker:
 
         # Initialize the appearance feature extractor
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.appearance_model = models.resnet50(pretrained=True).to(self.device)
+        self.appearance_model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT).to(
+            self.device
+        )
         self.appearance_model.eval()
         # Define image transforms
         self.transform = transforms.Compose(
