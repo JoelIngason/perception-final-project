@@ -32,26 +32,24 @@ class Visualizer:
         self,
         frame: Frame,
         tracked_objects: list[TrackedObject],
-        disparity_map: np.ndarray,
-        calib_params: dict[str, np.ndarray],
-    ) -> None:
+        depth_map: np.ndarray,
+    ) -> bool:
         """
         Display the frame with tracked objects and their 3D positions, along with a depth heatmap.
 
         Args:
             frame (Frame): Frame object containing rectified images and metadata.
             tracked_objects (List[TrackedObject]): List of tracked objects with 3D positions.
-            disparity_map (np.ndarray): Disparity map of the current frame for depth visualization.
-            calib_params (Dict[str, np.ndarray]): Dictionary containing calibration parameters.
+            depth_map (np.ndarray): Depth map of the current frame for depth visualization.
+
+        Returns:
+            bool: True if the visualization should continue, False if exit is requested.
 
         """
         img_left, _ = frame.images
 
         # Create a copy of the left image to draw bounding boxes and labels
         img_display = img_left.copy()
-
-        # Compute the full depth map from the disparity map
-        depth_map = self.compute_depth_map(disparity_map, calib_params)
 
         # Normalize the depth map for visualization
         depth_map_normalized = self.normalize_depth_map(depth_map)
@@ -107,7 +105,7 @@ class Visualizer:
                 cv2.LINE_AA,
             )
 
-        # Overlay the depth heatmap and the display image combined_visualization
+        # Overlay the depth heatmap and the display image
         combined_visualization = self._stack_images_vertically(img_display, depth_heatmap)
 
         # Display the combined visualization
@@ -118,36 +116,17 @@ class Visualizer:
         if key == ord("q"):
             self.logger.info("Exit key pressed. Closing visualization windows.")
             cv2.destroyAllWindows()
-        elif key == ord("t"):
+            return False
+        if key == ord("t"):
             # Toggle tracking information display
-            try:
-                track_id_input = input("Enter Track ID to display info: ")
-                self.selected_track_id = int(track_id_input)
-                self.logger.info(f"Selected Track ID: {self.selected_track_id}")
-                self.display_track_info(tracked_objects, self.selected_track_id)
-            except ValueError:
-                self.logger.warning("Invalid Track ID input.")
-
-    def compute_depth_map(
-        self,
-        disparity_map: np.ndarray,
-        calib_params: dict[str, np.ndarray],
-    ) -> np.ndarray:
-        """
-        Compute the depth map from disparity map using the formula depth = f * B / disparity.
-
-        Args:
-            disparity_map (np.ndarray): Disparity map of the current frame.
-            calib_params (Dict[str, np.ndarray]): Dictionary containing calibration parameters.
-
-        Returns:
-            np.ndarray: Depth map computed from disparity map.
-
-        """
-        with np.errstate(divide="ignore", invalid="ignore"):
-            depth_map = (calib_params["P_rect_02"][0, 0] * calib_params["baseline"]) / disparity_map
-            depth_map[disparity_map <= 0] = 0  # Assign zero depth where disparity is invalid
-        return depth_map
+            self.logger.info("Track information display toggled.")
+            self.display_track_info(tracked_objects)
+        elif key >= ord("0") and key <= ord("9"):
+            # Select track ID based on number key pressed
+            self.selected_track_id = int(chr(key))
+            self.logger.info(f"Selected Track ID: {self.selected_track_id}")
+            self.display_track_info(tracked_objects)
+        return True
 
     def normalize_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
         """
@@ -160,10 +139,16 @@ class Visualizer:
             np.ndarray: Normalized depth map as an 8-bit image.
 
         """
+        # Set invalid depth values to a maximum value for visualization purposes
+        max_depth = 50.0  # Maximum depth in meters for visualization
+        depth_map_vis = np.copy(depth_map)
+        depth_map_vis[depth_map_vis > max_depth] = max_depth
+        depth_map_vis[depth_map_vis <= 0] = max_depth
+
         # Normalize depth map for visualization
         normalized_depth_map = cv2.normalize(
-            depth_map,
-            np.zeros_like(depth_map),
+            depth_map_vis,
+            None,
             alpha=0,
             beta=255,
             norm_type=cv2.NORM_MINMAX,
@@ -203,17 +188,20 @@ class Visualizer:
         combined_image = np.vstack((img_top, img_bottom_resized))
         return combined_image
 
-    def display_track_info(self, tracked_objects: list, track_id: int) -> None:
-        """Display detailed information about a specific tracked object."""
-        for obj in tracked_objects:
-            if obj.track_id == track_id:
-                info = (
-                    f"Track ID: {obj.track_id}\n"
-                    f"Label: {obj.label}\n"
-                    f"3D Position: X={obj.position_3d[0]:.2f}m, "
-                    f"Y={obj.position_3d[1]:.2f}m, Z={obj.position_3d[2]:.2f}m"
-                )
-                self.logger.info(info)
-                break
+    def display_track_info(self, tracked_objects: list[TrackedObject]) -> None:
+        """Display detailed information about tracked objects."""
+        if self.selected_track_id is not None:
+            for obj in tracked_objects:
+                if obj.track_id == self.selected_track_id:
+                    info = (
+                        f"Track ID: {obj.track_id}\n"
+                        f"Label: {obj.label}\n"
+                        f"3D Position: X={obj.position_3d[0]:.2f}m, "
+                        f"Y={obj.position_3d[1]:.2f}m, Z={obj.position_3d[2]:.2f}m"
+                    )
+                    self.logger.info(info)
+                    break
+            else:
+                self.logger.warning(f"Track ID {self.selected_track_id} not found.")
         else:
-            self.logger.warning(f"Track ID {track_id} not found.")
+            self.logger.info("No Track ID selected.")

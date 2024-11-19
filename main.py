@@ -91,7 +91,7 @@ def main(config_path: str) -> None:  # noqa: C901, PLR0915
                     evaluator.evaluate(tracked_objects, frame.labels)
 
                     # Visualize
-                    visualizer.display(frame, tracked_objects, disparity_map, calib_params)
+                    visualizer.display(frame, tracked_objects, disparity_map)
                 except Exception:
                     logger.exception("Error processing frame")
                     continue

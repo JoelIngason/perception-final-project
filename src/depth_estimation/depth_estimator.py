@@ -39,32 +39,53 @@ class DepthEstimator:
             self.logger.exception(f"Error initializing DepthEstimator: {e}")
             raise
 
+        # StereoSGBM parameters
+        window_size = 5
+        min_disparity = 0
+        num_disparities = 16 * 10  # Must be divisible by 16
+        block_size = window_size
+        P1 = 8 * 3 * window_size**2
+        P2 = 32 * 3 * window_size**2
+        disp12_max_diff = 1
+        uniqueness_ratio = 10
+        speckle_window_size = 100
+        speckle_range = 32
+        pre_filter_cap = 63
+        mode = cv2.STEREO_SGBM_MODE_SGBM_3WAY
+
         # Initialize StereoSGBM matcher with improved parameters
         self.stereo_matcher = cv2.StereoSGBM.create(
-            minDisparity=0,
-            numDisparities=16 * 5,  # Must be divisible by 16
-            blockSize=5,
-            P1=8 * 3 * 5**2,
-            P2=32 * 3 * 5**2,
-            disp12MaxDiff=1,
-            uniquenessRatio=15,
-            speckleWindowSize=0,
-            speckleRange=2,
-            preFilterCap=63,
-            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+            minDisparity=min_disparity,
+            numDisparities=num_disparities,
+            blockSize=block_size,
+            P1=P1,
+            P2=P2,
+            disp12MaxDiff=disp12_max_diff,
+            uniquenessRatio=uniqueness_ratio,
+            speckleWindowSize=speckle_window_size,
+            speckleRange=speckle_range,
+            preFilterCap=pre_filter_cap,
+            mode=mode,
         )
         self.logger.info("StereoSGBM matcher initialized with improved parameters")
 
+        # Initialize WLS filter for disparity map refinement
+        self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(matcher_left=self.stereo_matcher)
+        self.right_matcher = cv2.ximgproc.createRightMatcher(self.stereo_matcher)
+        self.wls_filter.setLambda(8000.0)
+        self.wls_filter.setSigmaColor(1.5)
+        self.logger.info("WLS filter initialized for disparity refinement")
+
     def compute_disparity_map(self, img_left: np.ndarray, img_right: np.ndarray) -> np.ndarray:
         """
-        Compute the disparity map from rectified stereo images.
+        Compute the refined disparity map from rectified stereo images.
 
         Args:
             img_left (np.ndarray): Rectified left image.
             img_right (np.ndarray): Rectified right image.
 
         Returns:
-            np.ndarray: Disparity map.
+            np.ndarray: Refined disparity map.
 
         """
         try:
@@ -72,17 +93,36 @@ class DepthEstimator:
             gray_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
             gray_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
 
-            # Compute disparity using StereoSGBM
-            disparity = self.stereo_matcher.compute(gray_left, gray_right).astype(np.float32) / 16.0
-            self.logger.debug("Disparity map computed.")
+            # Compute left and right disparity maps
+            disparity_left = self.stereo_matcher.compute(gray_left, gray_right)
+            disparity_right = self.right_matcher.compute(gray_right, gray_left)
 
-            # Replace negative disparities with zero
-            disparity[disparity < 0] = 0
+            # Apply WLS filter to refine disparity map
+            disparity_left = np.int16(disparity_left)
+            disparity_right = np.int16(disparity_right)
+            filtered_disparity = self.wls_filter.filter(
+                disparity_left,
+                img_left,
+                None,
+                disparity_right,
+            )
+            self.logger.debug("Disparity map computed and refined using WLS filter.")
 
-            return disparity
+            ## Normalize the disparity map for visualization
+            # filtered_disparity = cv2.normalize(
+            #    filtered_disparity,
+            #    None,
+            #    alpha=0,
+            #    beta=255,
+            #    norm_type=cv2.NORM_MINMAX,
+            #    dtype=cv2.CV_8U,
+            # )
+
         except Exception as e:
             self.logger.exception(f"Error computing disparity map: {e}")
             raise
+        else:
+            return filtered_disparity
 
     def compute_depth(self, disparity: float) -> float:
         """
@@ -98,5 +138,5 @@ class DepthEstimator:
         if disparity <= 0:
             self.logger.warning(f"Non-positive disparity encountered: {disparity}")
             return 0.0
-        depth = self.focal_length * self.baseline / disparity
+        depth = (self.focal_length * self.baseline) / disparity
         return depth
