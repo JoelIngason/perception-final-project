@@ -1,6 +1,73 @@
 import logging
 
+import cv2
 import numpy as np
+
+
+def calculate_reprojection_error(
+    objpoints: list,
+    imgpoints_left: list,
+    imgpoints_right: list,
+    rvecs_left,
+    tvecs_left,
+    rvecs_right,
+    tvecs_right,
+    camera_matrix_left,
+    dist_coeffs_left,
+    camera_matrix_right,
+    dist_coeffs_right,
+    R,
+    T,
+) -> float:
+    """
+    Calculate the reprojection error for stereo calibration.
+
+    Args:
+        objpoints (List): 3D points in real world space.
+        imgpoints_left (List): 2D points in left image.
+        imgpoints_right (List): 2D points in right image.
+        rvecs_left, tvecs_left (List): Rotation and translation vectors for left camera.
+        rvecs_right, tvecs_right (List): Rotation and translation vectors for right camera.
+        camera_matrix_left, dist_coeffs_left (np.ndarray): Left camera matrix and distortion coefficients.
+        camera_matrix_right, dist_coeffs_right (np.ndarray): Right camera matrix and distortion coefficients.
+        R, T (np.ndarray): Rotation and translation between the cameras.
+
+    Returns:
+        float: Average reprojection error.
+
+    """
+    total_error = 0
+    total_points = 0
+    for i in range(len(objpoints)):
+        # Project points onto left image
+        imgpoints_left_proj, _ = cv2.projectPoints(
+            objpoints[i],
+            rvecs_left[i],
+            tvecs_left[i],
+            camera_matrix_left,
+            dist_coeffs_left,
+        )
+        error_left = cv2.norm(imgpoints_left[i], imgpoints_left_proj, cv2.NORM_L2) / len(
+            imgpoints_left_proj,
+        )
+
+        # Project points onto right image
+        imgpoints_right_proj, _ = cv2.projectPoints(
+            objpoints[i],
+            rvecs_right[i],
+            tvecs_right[i],
+            camera_matrix_right,
+            dist_coeffs_right,
+        )
+        error_right = cv2.norm(imgpoints_right[i], imgpoints_right_proj, cv2.NORM_L2) / len(
+            imgpoints_right_proj,
+        )
+
+        total_error += error_left + error_right
+        total_points += 2
+
+    mean_error = total_error / total_points if total_points > 0 else 0
+    return mean_error
 
 
 class StereoCalibrator:
@@ -57,7 +124,54 @@ class StereoCalibrator:
             if missing_keys:
                 self.logger.error(f"Missing calibration parameters: {missing_keys}")
                 msg = f"Missing calibration parameters: {missing_keys}"
-                raise KeyError(msg)  # noqa: TRY301
+                raise KeyError(msg)
+
+            # Calculate baseline from projection matrices
+            P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
+            P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
+
+            self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
+            Tx_left = P_rect_02[0, 3]
+            Tx_right = P_rect_03[0, 3]
+            self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
+
+            # Store baseline in calibration parameters
+            calib_params["baseline"] = self.baseline
+
+            # Calculate reprojection error
+            # Assuming objpoints, imgpoints_left, imgpoints_right are available
+            objpoints = calib_params.get("objpoints", [])
+            if isinstance(objpoints, np.ndarray):
+                objpoints = objpoints.tolist()
+            # Convert image points to list if they are numpy arrays
+            imgpoints_left = calib_params.get("imgpoints_left", [])
+            imgpoints_right = calib_params.get("imgpoints_right", [])
+            if isinstance(imgpoints_left, np.ndarray):
+                imgpoints_left = imgpoints_left.tolist()
+            if isinstance(imgpoints_right, np.ndarray):
+                imgpoints_right = imgpoints_right.tolist()
+
+            reproj_error = calculate_reprojection_error(
+                objpoints=objpoints,
+                imgpoints_left=imgpoints_left,
+                imgpoints_right=imgpoints_right,
+                rvecs_left=calib_params.get("rvecs_left", []),
+                tvecs_left=calib_params.get("tvecs_left", []),
+                rvecs_right=calib_params.get("rvecs_right", []),
+                tvecs_right=calib_params.get("tvecs_right", []),
+                camera_matrix_left=calib_params["K_02"],
+                dist_coeffs_left=calib_params["D_02"],
+                camera_matrix_right=calib_params["K_03"],
+                dist_coeffs_right=calib_params["D_03"],
+                R=calib_params["R_02"],
+                T=calib_params["T_02"],
+            )
+            self.logger.info(f"Stereo calibration reprojection error: {reproj_error:.4f} pixels")
+
+            if reproj_error > 1.0:
+                self.logger.warning(
+                    "High reprojection error detected. Consider recalibrating the stereo cameras.",
+                )
 
             self.logger.info("Stereo calibration completed successfully")
         except Exception:
@@ -66,7 +180,7 @@ class StereoCalibrator:
         else:
             return calib_params
 
-    def _load_calibration_file(self, filepath: str) -> dict[str, np.ndarray]:  # noqa: C901, PLR0915, PLR0912
+    def _load_calibration_file(self, filepath: str) -> dict[str, np.ndarray]:
         """
         Load calibration parameters from a text file.
 
@@ -125,8 +239,7 @@ class StereoCalibrator:
                             self.logger.debug(f"Loaded {key} as 3x4 projection matrix.")
                         else:
                             self.logger.warning(
-                                f"""Key '{key}' has unexpected number of values ({len(values)}).
-                                 Skipping.""",
+                                f"Key '{key}' has unexpected number of values ({len(values)}). Skipping.",
                             )
                     elif key.startswith("D_"):
                         calib_params[key] = np.array(values)
@@ -141,8 +254,7 @@ class StereoCalibrator:
                             )
                         else:
                             self.logger.warning(
-                                f"""Key '{key}' has unexpected number of values ({len(values)}).
-                                     Expected 3 for T_. Skipping.""",
+                                f"Key '{key}' has unexpected number of values ({len(values)}). Expected 3 for T_. Skipping.",
                             )
                     elif key.startswith("S_") or key.startswith("R_rect_"):
                         calib_params[key] = np.array(values)
@@ -157,6 +269,6 @@ class StereoCalibrator:
         except Exception:
             self.logger.exception("Unexpected error while loading calibration file")
             raise
-
-        self.logger.debug(f"Loaded calibration parameters: {list(calib_params.keys())}")
-        return calib_params
+        else:
+            self.logger.debug(f"Loaded calibration parameters: {list(calib_params.keys())}")
+            return calib_params

@@ -9,6 +9,22 @@ import numpy as np
 
 
 @dataclass
+class DetectionResult:
+    """Data class representing a single detection result."""
+
+    bbox: list[float]  # [x, y, w, h]
+    confidence: float
+    class_id: int
+    label: str
+    position_3d: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    image_left: np.ndarray = field(default_factory=lambda: np.zeros((1, 1, 3), dtype=np.uint8))
+
+    def add_3d_position(self, position: tuple[float, float, float]) -> None:
+        """Add 3D position to the detection."""
+        self.position_3d = position
+
+
+@dataclass
 class Frame:
     """Data class representing a single frame with left and right images, timestamps, and labels."""
 
@@ -47,6 +63,15 @@ class TrackedObject:
     class_id: int
     label: str
     position_3d: tuple[float, float, float]
+
+    def to_supported_label(self) -> str:
+        """Return the supported label for the object."""
+        MAP = {
+            "car": "Car",
+            "person": "Pedestrian",
+            "bicycle": "Cyclist",
+        }
+        return MAP.get(self.label, "Unknown")
 
 
 class DataLoader:

@@ -19,6 +19,15 @@ class Visualizer:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
+        # Initialize track visualization parameters
+        self.selected_track_id = None
+        self.track_info = {}
+
+    def reset(self):
+        """Reset the visualizer state for a new sequence."""
+        self.selected_track_id = None
+        self.track_info = {}
+
     def display(
         self,
         frame: Frame,
@@ -36,7 +45,7 @@ class Visualizer:
             calib_params (Dict[str, np.ndarray]): Dictionary containing calibration parameters.
 
         """
-        img_left, img_right = frame.images
+        img_left, _ = frame.images
 
         # Create a copy of the left image to draw bounding boxes and labels
         img_display = img_left.copy()
@@ -104,11 +113,20 @@ class Visualizer:
         # Display the combined visualization
         cv2.imshow("Autonomous Perception - 2D and Depth Visualization", combined_visualization)
 
-        # Wait for a short period; allow exit with 'q' key
+        # Handle keyboard inputs for interactivity
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
-            self.logger.info("Exit key pressed. Closing visualization window.")
+            self.logger.info("Exit key pressed. Closing visualization windows.")
             cv2.destroyAllWindows()
+        elif key == ord("t"):
+            # Toggle tracking information display
+            try:
+                track_id_input = input("Enter Track ID to display info: ")
+                self.selected_track_id = int(track_id_input)
+                self.logger.info(f"Selected Track ID: {self.selected_track_id}")
+                self.display_track_info(tracked_objects, self.selected_track_id)
+            except ValueError:
+                self.logger.warning("Invalid Track ID input.")
 
     def compute_depth_map(
         self,
@@ -127,15 +145,7 @@ class Visualizer:
 
         """
         with np.errstate(divide="ignore", invalid="ignore"):
-            P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
-            P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
-
-            self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
-            # Compute baseline from projection matrices
-            Tx_left = P_rect_02[0, 3]
-            Tx_right = P_rect_03[0, 3]
-            self.baseline = np.abs(Tx_right - Tx_left) / self.focal_length
-            depth_map = (self.focal_length * self.baseline) / disparity_map
+            depth_map = (calib_params["P_rect_02"][0, 0] * calib_params["baseline"]) / disparity_map
             depth_map[disparity_map <= 0] = 0  # Assign zero depth where disparity is invalid
         return depth_map
 
@@ -150,23 +160,16 @@ class Visualizer:
             np.ndarray: Normalized depth map as an 8-bit image.
 
         """
-        valid_mask = depth_map > 0
-        if np.any(valid_mask):
-            min_val = np.min(depth_map[valid_mask])
-            max_val = np.max(depth_map[valid_mask])
-            if max_val - min_val > 1e-3:
-                depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
-                depth_map_normalized[valid_mask] = np.clip(
-                    255 * (depth_map[valid_mask] - min_val) / (max_val - min_val),
-                    0,
-                    255,
-                ).astype(np.uint8)
-            else:
-                depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
-        else:
-            self.logger.warning("No valid depth values found. Depth heatmap will be all zeros.")
-            depth_map_normalized = np.zeros_like(depth_map, dtype=np.uint8)
-        return depth_map_normalized
+        # Normalize depth map for visualization
+        normalized_depth_map = cv2.normalize(
+            depth_map,
+            np.zeros_like(depth_map),
+            alpha=0,
+            beta=255,
+            norm_type=cv2.NORM_MINMAX,
+            dtype=cv2.CV_8U,
+        )
+        return normalized_depth_map
 
     def _stack_images_vertically(self, img_top: np.ndarray, img_bottom: np.ndarray) -> np.ndarray:
         """
@@ -190,13 +193,27 @@ class Visualizer:
                 (width_top, new_height),
                 interpolation=cv2.INTER_AREA,
             )
-            self.logger.debug(
+            self.logger.info(
                 f"Resized bottom image from ({width_bottom}, {height_bottom}) "
                 f"to ({width_top}, {new_height}) to match top image width.",
             )
         else:
             img_bottom_resized = img_bottom
 
-        # Stack images vertically
         combined_image = np.vstack((img_top, img_bottom_resized))
-        return combined_image  # noqa: RET504
+        return combined_image
+
+    def display_track_info(self, tracked_objects: list, track_id: int) -> None:
+        """Display detailed information about a specific tracked object."""
+        for obj in tracked_objects:
+            if obj.track_id == track_id:
+                info = (
+                    f"Track ID: {obj.track_id}\n"
+                    f"Label: {obj.label}\n"
+                    f"3D Position: X={obj.position_3d[0]:.2f}m, "
+                    f"Y={obj.position_3d[1]:.2f}m, Z={obj.position_3d[2]:.2f}m"
+                )
+                self.logger.info(info)
+                break
+        else:
+            self.logger.warning(f"Track ID {track_id} not found.")

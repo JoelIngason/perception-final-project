@@ -77,6 +77,9 @@ def main(config_path: str) -> None:  # noqa: C901, PLR0915
     try:
         for seq_id, frames in data.items():
             logger.info(f"Processing sequence {seq_id} with {len(frames)} frames.")
+            detector.reset()
+            evaluator.reset()
+            visualizer.reset()
             for frame in frames:
                 try:
                     # Perform detection and tracking
@@ -92,9 +95,12 @@ def main(config_path: str) -> None:  # noqa: C901, PLR0915
                 except Exception:
                     logger.exception("Error processing frame")
                     continue
+            evaluator.report()
+            logger.info(f"Sequence {seq_id} processed successfully with {len(frames)} frames.")
+
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user. Exiting...")
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error during processing")
     finally:
         # Final Evaluation

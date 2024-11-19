@@ -19,9 +19,12 @@ dependencies:
   - ruff
   - python-dotenv
   - ultralytics
+  - open3d
+  - timm
   - pip:
     - tensorboard
     - torch-tb-profiler
     - tensorboard-plugin-profile
     - sort-track
     - deep-sort-realtime
+    - motpy
