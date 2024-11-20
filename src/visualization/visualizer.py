@@ -1,9 +1,7 @@
 import logging
-import threading
 
 import cv2
 import numpy as np
-import open3d as o3d
 
 from src.data_loader.dataset import Frame, TrackedObject
 
@@ -11,14 +9,8 @@ from src.data_loader.dataset import Frame, TrackedObject
 class Visualizer:
     """Visualize the frame with tracked objects and depth information."""
 
-    def __init__(self, calib_params: dict[str, np.ndarray]) -> None:
-        """
-        Initialize the Visualizer with appropriate logging configurations.
-
-        Args:
-            calib_params (Dict[str, np.ndarray]): Stereo calibration parameters.
-
-        """
+    def __init__(self):
+        """Initialize the Visualizer with appropriate logging configurations."""
         self.logger = logging.getLogger("autonomous_perception.visualization")
         self.logger.setLevel(logging.INFO)
         if not self.logger.hasHandlers():
@@ -31,69 +23,33 @@ class Visualizer:
         self.selected_track_id = None
         self.track_info = {}
 
-        # Camera intrinsic parameters
-        P_rect_02 = calib_params["P_rect_02"]  # 3x4 matrix
-        P_rect_03 = calib_params["P_rect_03"]  # 3x4 matrix
-        self.focal_length = P_rect_02[0, 0]  # fx from rectified left projection matrix
-
-        # Compute baseline
-        Tx_left = P_rect_02[0, 3] / -self.focal_length  # In meters
-        Tx_right = P_rect_03[0, 3] / -self.focal_length  # In meters
-        self.baseline = Tx_right - Tx_left  # Positive value
-
-        self.cx = P_rect_02[0, 2]  # Principal point x-coordinate
-        self.cy = P_rect_02[1, 2]  # Principal point y-coordinate
-
-        # Synchronization lock
-        self.lock = threading.Lock()
-
-        # Open3D visualization setup
-        self.vis = o3d.visualization.Visualizer()
-        self.vis.create_window(window_name="Point Cloud Visualization", width=960, height=540)
-        self.pcd = o3d.geometry.PointCloud()
-        self.is_first_frame = True
-
-        # Start Open3D visualization in a separate thread
-        self.open3d_thread = threading.Thread(target=self._open3d_visualization_loop, daemon=True)
-        self.open3d_thread.start()
-
     def reset(self):
         """Reset the visualizer state for a new sequence."""
         self.selected_track_id = None
         self.track_info = {}
-        self.is_first_frame = True
-        with self.lock:
-            self.pcd.clear()
-            self.vis.clear_geometries()
-            self.vis.add_geometry(self.pcd)
-            self.vis.reset_view_point(True)
-
-    def close(self):
-        """Close the Open3D visualization window."""
-        self.vis.destroy_window()
 
     def display(
         self,
         frame: Frame,
         tracked_objects: list[TrackedObject],
         depth_map: np.ndarray,
-        color_image: np.ndarray,
     ) -> bool:
         """
-        Display the frame with tracked objects and their 3D positions.
+        Display the frame with tracked objects and their 3D positions, along with a depth heatmap.
 
         Args:
             frame (Frame): Frame object containing rectified images and metadata.
             tracked_objects (List[TrackedObject]): List of tracked objects with 3D positions.
-            depth_map (np.ndarray): Depth map of the current frame.
-            color_image (np.ndarray): The corresponding color image for coloring the point cloud.
+            depth_map (np.ndarray): Depth map of the current frame for depth visualization.
 
         Returns:
             bool: True if the visualization should continue, False if exit is requested.
 
         """
-        # Create a copy of the color image to draw bounding boxes and labels
-        img_display = color_image.copy()
+        img_left, _ = frame.images
+
+        # Create a copy of the left image to draw bounding boxes and labels
+        img_display = img_left.copy()
 
         # Draw tracked objects on the display image
         for obj in tracked_objects:
@@ -143,25 +99,25 @@ class Visualizer:
                 cv2.LINE_AA,
             )
 
-        # Display the image with bounding boxes
-        cv2.imshow("Autonomous Perception - 2D Visualization", img_display)
+        # Normalize the depth map for visualization
+        depth_map_normalized = self.normalize_depth_map(depth_map)
 
-        # Generate point cloud from depth map
-        points, colors = self.generate_point_cloud(depth_map, color_image)
+        # Apply a colormap to the normalized depth map to create a heatmap
+        depth_heatmap = cv2.applyColorMap(depth_map_normalized, cv2.COLORMAP_JET)
 
-        # Update point cloud data in a thread-safe manner
-        with self.lock:
-            self.pcd.points = o3d.utility.Vector3dVector(points)
-            self.pcd.colors = o3d.utility.Vector3dVector(colors)
+        # Stack the images vertically or side by side
+        combined_visualization = self._stack_images_vertically(img_display, depth_heatmap)
+
+        # Display the combined visualization
+        cv2.imshow("Autonomous Perception - 2D Image and Depth Heatmap", combined_visualization)
 
         # Handle keyboard inputs for interactivity
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             self.logger.info("Exit key pressed. Closing visualization windows.")
             cv2.destroyAllWindows()
-            self.close()
             return False
-        if key == ord("t"):
+        elif key == ord("t"):
             # Toggle tracking information display
             self.logger.info("Track information display toggled.")
             self.display_track_info(tracked_objects)
@@ -170,63 +126,91 @@ class Visualizer:
             self.selected_track_id = int(chr(key))
             self.logger.info(f"Selected Track ID: {self.selected_track_id}")
             self.display_track_info(tracked_objects)
-        return True  # Continue visualization
+        return True
 
-    def _open3d_visualization_loop(self):
-        """Run the Open3D visualization loop in a separate thread."""
-        while True:
-            with self.lock:
-                self.vis.update_geometry(self.pcd)
-            self.vis.poll_events()
-            self.vis.update_renderer()
-
-    def generate_point_cloud(
-        self,
-        depth_map: np.ndarray,
-        color_image: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def normalize_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
         """
-        Generate a point cloud from the depth map and color image.
+        Normalize and invert the depth map for visualization.
 
         Args:
             depth_map (np.ndarray): Depth map with depth in meters.
-            color_image (np.ndarray): Corresponding color image.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Tuple of points (Nx3) and colors (Nx3).
+            np.ndarray: Inverted and normalized depth map as an 8-bit image.
 
         """
-        # Get image dimensions
-        height, width = depth_map.shape
+        # Define the minimum and maximum depth values for visualization
+        min_depth = 0.001  # Minimum depth in meters to avoid division by zero and noise
+        max_depth = 100.0  # Maximum depth in meters for visualization
 
-        # Create meshgrid of pixel coordinates
-        u = np.arange(width)
-        v = np.arange(height)
-        u_grid, v_grid = np.meshgrid(u, v)
+        depth_map_vis = np.copy(depth_map)
 
-        # Flatten the arrays
-        u_grid = u_grid.flatten()
-        v_grid = v_grid.flatten()
-        depth = depth_map.flatten()
+        # Set invalid depth values to zero
+        invalid_mask = (
+            (depth_map_vis <= min_depth) | (depth_map_vis > max_depth) | np.isnan(depth_map_vis)
+        )
+        depth_map_vis[invalid_mask] = 0
 
-        # Filter out invalid depth values
-        valid = depth > 0
-        u_valid = u_grid[valid]
-        v_valid = v_grid[valid]
-        depth_valid = depth[valid]
+        # Invert depth values for visualization
+        # Closer objects (smaller depth values) will have higher intensity values
+        valid_mask = depth_map_vis > 0
+        depth_values = depth_map_vis[valid_mask]
 
-        # Compute 3D points
-        x = (u_valid - self.cx) * depth_valid / self.focal_length
-        y = (v_valid - self.cy) * depth_valid / self.focal_length
-        z = depth_valid
+        normalized_depth_map = np.zeros_like(depth_map_vis, dtype=np.uint8)
 
-        points = np.vstack((x, y, z)).transpose()
+        if depth_values.size > 0:
+            # Invert depth values
+            inverted_depth_values = max_depth - depth_values
 
-        # Get colors
-        color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-        colors = color_image.reshape(-1, 3)[valid] / 255.0  # Normalize to [0,1]
+            # Normalize the inverted depth values to 0-255
+            depth_min = inverted_depth_values.min()
+            depth_max = inverted_depth_values.max()
+            self.logger.debug(f"Depth map inversion: min={depth_min}, max={depth_max}")
 
-        return points, colors
+            # Avoid division by zero
+            if depth_max > depth_min:
+                normalized_values = (
+                    (inverted_depth_values - depth_min) / (depth_max - depth_min) * 255
+                ).astype(np.uint8)
+            else:
+                normalized_values = np.zeros_like(inverted_depth_values, dtype=np.uint8)
+            normalized_depth_map[valid_mask] = normalized_values
+        else:
+            self.logger.warning("No valid depth values found for normalization.")
+
+        return normalized_depth_map
+
+    def _stack_images_vertically(self, img_top: np.ndarray, img_bottom: np.ndarray) -> np.ndarray:
+        """
+        Stack two images vertically, resizing them to have the same width.
+
+        Args:
+            img_top (np.ndarray): Top image.
+            img_bottom (np.ndarray): Bottom image.
+
+        Returns:
+            np.ndarray: Combined image stacked vertically.
+
+        """
+        height_top, width_top = img_top.shape[:2]
+        height_bottom, width_bottom = img_bottom.shape[:2]
+        if width_top != width_bottom:
+            scaling_factor = width_top / width_bottom
+            new_height = int(height_bottom * scaling_factor)
+            img_bottom_resized = cv2.resize(
+                img_bottom,
+                (width_top, new_height),
+                interpolation=cv2.INTER_AREA,
+            )
+            self.logger.info(
+                f"Resized bottom image from ({width_bottom}, {height_bottom}) "
+                f"to ({width_top}, {new_height}) to match top image width.",
+            )
+        else:
+            img_bottom_resized = img_bottom
+
+        combined_image = np.vstack((img_top, img_bottom_resized))
+        return combined_image
 
     def display_track_info(self, tracked_objects: list[TrackedObject]) -> None:
         """Display detailed information about tracked objects."""
