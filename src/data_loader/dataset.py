@@ -63,6 +63,8 @@ class TrackedObject:
     class_id: int
     label: str
     position_3d: tuple[float, float, float]
+    dimensions: tuple[float, float, float]
+    oriented_bbox: list[tuple[int, int]] = field(default_factory=list)  # List of points
 
     def to_supported_label(self) -> str:
         """Return the supported label for the object."""

@@ -18,8 +18,6 @@ class Visualizer:
             formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
-
-        # Initialize track visualization parameters
         self.selected_track_id = None
         self.track_info = {}
 
@@ -34,99 +32,100 @@ class Visualizer:
         tracked_objects: list[TrackedObject],
         depth_map: np.ndarray,
     ) -> bool:
-        """
-        Display the frame with tracked objects and their 3D positions, along with a depth heatmap.
-
-        Args:
-            frame (Frame): Frame object containing rectified images and metadata.
-            tracked_objects (List[TrackedObject]): List of tracked objects with 3D positions.
-            depth_map (np.ndarray): Depth map of the current frame for depth visualization.
-
-        Returns:
-            bool: True if the visualization should continue, False if exit is requested.
-
-        """
+        """Display the frame with tracked objects and their 3D positions, along with a depth heatmap."""
         img_left, _ = frame.images
-
-        # Create a copy of the left image to draw bounding boxes and labels
         img_display = img_left.copy()
 
-        # Draw tracked objects on the display image
         for obj in tracked_objects:
             track_id = obj.track_id
             x, y, w, h = obj.bbox
             x1, y1, x2, y2 = int(x), int(y), int(x + w), int(y + h)
             label = obj.label
-            position_3d = obj.position_3d  # (X, Y, Z) in meters
+            position_3d = obj.position_3d
+            dimensions = obj.dimensions
 
-            # Draw bounding box on the display image
+            # Draw oriented bounding box if available
+            if hasattr(obj, "oriented_bbox"):
+                self._draw_oriented_bbox(img_display, obj.oriented_bbox, obj.label)
+            else:
+                # Draw regular bounding box
+                cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
             cv2.rectangle(img_display, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Prepare label text with 3D position
             text = (
                 f"ID {track_id} - {label} - "
                 f"X: {position_3d[0]:.2f}m, "
                 f"Y: {position_3d[1]:.2f}m, "
                 f"Z: {position_3d[2]:.2f}m"
             )
-
-            # Calculate position for text to avoid overlapping with bounding box
-            TEXT_OFFSET = 10
-            text_position = (
-                x1,
-                y1 - TEXT_OFFSET if y1 - TEXT_OFFSET > TEXT_OFFSET else y1 + TEXT_OFFSET,
+            dimension_text = (
+                f"H: {dimensions[0]:.2f}m, W: {dimensions[1]:.2f}m, L: {dimensions[2]:.2f}m"
             )
+            # Draw texts
+            self._draw_label(img_display, text, x1, y1 - 30)
+            self._draw_label(img_display, dimension_text, x1, y1 - 10)
 
-            # Draw label background for better readability
-            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            cv2.rectangle(
-                img_display,
-                (text_position[0], text_position[1] - text_height - 5),
-                (text_position[0] + text_width, text_position[1] + 5),
-                (0, 255, 0),
-                cv2.FILLED,
-            )
-
-            # Put text on the image
-            cv2.putText(
-                img_display,
-                text,
-                text_position,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 0),  # Black text for contrast
-                2,
-                cv2.LINE_AA,
-            )
-
-        # Normalize the depth map for visualization
-        depth_map_normalized = self.normalize_depth_map(depth_map)
-
-        # Apply a colormap to the normalized depth map to create a heatmap
-        depth_heatmap = cv2.applyColorMap(depth_map_normalized, cv2.COLORMAP_JET)
-
-        # Stack the images vertically or side by side
+        depth_heatmap = self._create_depth_heatmap(depth_map)
         combined_visualization = self._stack_images_vertically(img_display, depth_heatmap)
+        cv2.imshow("Autonomous Perception", combined_visualization)
 
-        # Display the combined visualization
-        cv2.imshow("Autonomous Perception - 2D Image and Depth Heatmap", combined_visualization)
-
-        # Handle keyboard inputs for interactivity
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             self.logger.info("Exit key pressed. Closing visualization windows.")
             cv2.destroyAllWindows()
             return False
-        elif key == ord("t"):
-            # Toggle tracking information display
-            self.logger.info("Track information display toggled.")
-            self.display_track_info(tracked_objects)
-        elif key >= ord("0") and key <= ord("9"):
-            # Select track ID based on number key pressed
-            self.selected_track_id = int(chr(key))
-            self.logger.info(f"Selected Track ID: {self.selected_track_id}")
-            self.display_track_info(tracked_objects)
         return True
+
+    def _draw_oriented_bbox(self, image, bbox, label):
+        """Draw an oriented bounding box on the image."""
+        # bbox is expected to be a list of four points (x, y)
+        if not bbox or len(bbox) == 0:
+            return
+        pts = np.array(bbox, np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(image, [pts], True, (0, 255, 0), 2)
+        # Put label
+        x, y = pts[0][0]
+        cv2.putText(
+            image,
+            label,
+            (x, y - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
+    def _draw_label(self, img, text, x, y):
+        """Helper function to draw a label with background."""
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
+        cv2.rectangle(
+            img,
+            (x, y - text_size[1]),
+            (x + text_size[0], y + 5),
+            (0, 255, 0),
+            cv2.FILLED,
+        )
+        cv2.putText(
+            img,
+            text,
+            (x, y),
+            font,
+            font_scale,
+            (0, 0, 0),
+            thickness,
+            cv2.LINE_AA,
+        )
+
+    def _create_depth_heatmap(self, depth_map):
+        """Create a heatmap from the depth map."""
+        depth_map_normalized = self.normalize_depth_map(depth_map)
+        depth_heatmap = cv2.applyColorMap(depth_map_normalized, cv2.COLORMAP_JET)
+        return depth_heatmap
 
     def normalize_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
         """

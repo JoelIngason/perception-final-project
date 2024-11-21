@@ -18,7 +18,6 @@ dependencies:
   - pyyaml
   - ruff
   - python-dotenv
-  - ultralytics
   - open3d
   - timm
   - pip:
@@ -28,3 +27,4 @@ dependencies:
     - sort-track
     - deep-sort-realtime
     - motpy
+    - ultralytics

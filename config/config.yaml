@@ -20,7 +20,7 @@ detection:
   confidence_threshold: 0.5
   nms_threshold: 0.4
   classification:
-    model_path: "src/models/yolov8/yolov8n.pt"
+    model_path: "yolo11m-seg.pt"
     input_size: 224
 
 tracking:
@@ -28,6 +28,14 @@ tracking:
   max_age: 30
   min_hits: 3
 
+
+stereo:
+  disp12_max_diff: 1
+  uniqueness_ratio: 15
+  speckle_window_size: 100
+  speckle_range: 32
+  pre_filter_cap: 63
+  
 logging:
   config_file: "config/logging.yaml"
 

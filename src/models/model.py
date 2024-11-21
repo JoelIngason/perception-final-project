@@ -19,10 +19,10 @@ def load_model(model_path: str = "yolov8n.pt") -> YOLO:
 
     """
     logger = logging.getLogger("autonomous_perception.models")
-    if not Path(model_path).exists():
-        msg = f"YOLO model file not found at {model_path}"
-        logger.error(msg)
-        raise FileNotFoundError(msg)
+    # if not Path(model_path).exists():
+    #    msg = f"YOLO model file not found at {model_path}"
+    #    logger.error(msg)
+    #    raise FileNotFoundError(msg)
     logger.info(f"Loading YOLO model from {model_path}")
     return YOLO(model_path, verbose=False)
 
