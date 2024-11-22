@@ -1,5 +1,3 @@
-# src/detection/detection_result.py
-
 import logging
 from dataclasses import dataclass, field
 
@@ -10,77 +8,94 @@ import numpy as np
 class DetectionResult:
     """DetectionResult class to store detection information."""
 
-    logger = logging.getLogger("autonomous_perception.detection")
-    bbox: list[float]  # [x, y, w, h]
+    bbox: list[int]  # [left, top, right, bottom]
     confidence: float
     class_id: int
     label: str
-    mask: np.ndarray = field(default_factory=lambda: np.array([]))  # Full image size mask
-    position_3d: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    dimensions: tuple[float, float, float] = (0.0, 0.0, 0.0)  # height, width, length
-    appearance_feature: np.ndarray = field(default_factory=lambda: np.array([]))
-    oriented_bbox: np.ndarray = field(default_factory=lambda: np.array([]))
-    fx: float = None
-    fy: float = None
-    cx: float = None
-    cy: float = None
+    mask: np.ndarray | None = field(default_factory=lambda: np.array([]))  # Full image size mask
+    position_3d: tuple[float, float, float] | None = None
+    dimensions: tuple[float, float, float] | None = None  # height, width, length
+    appearance_feature: np.ndarray | None = field(default_factory=lambda: np.array([]))
+    oriented_bbox: np.ndarray | None = field(default_factory=lambda: np.array([]))
+    fx: float | None = None
+    fy: float | None = None
+    cx: float | None = None
+    cy: float | None = None
+
+    # Initialize a logger for the class
+    def __post_init__(self):
+        self.logger = logging.getLogger("autonomous_perception.detection_result")
+        if not self.logger.hasHandlers():
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
 
     def add_3d_position(self, position_3d: tuple[float, float, float]) -> None:
         """Add 3D position to the detection result."""
         self.position_3d = position_3d
+        self.logger.debug(f"Added 3D position: {self.position_3d}")
 
-    def estimate_dimensions(self, depth_map: np.ndarray) -> None:
-        """Estimate object dimensions using depth map and camera intrinsics."""
+    def estimate_dimensions(self, depth: float) -> None:
+        """
+        Estimate object dimensions using depth map and camera intrinsics.
+
+        Args:
+            depth (float): Depth value of the object in meters.
+
+        """
+        # Estimate object dimensions by using bounding box area and depth
+        if self.bbox is None or len(self.bbox) == 0:
+            self.logger.debug("No bounding box available for dimensions estimation.")
+            return
+
+        width = self.bbox[2] - self.bbox[0]
+        height = self.bbox[3] - self.bbox[1]
+
+        self.dimensions = (height, width, depth)
+
+    def to_supported_label(self) -> str:
+        """Return the supported label for the object."""
+        MAP = {
+            "car": "Car",
+            "person": "Pedestrian",
+            "bicycle": "Cyclist",
+        }
+        return MAP.get(self.label.lower(), "Unknown")
+
+    def compute_position_3d(self, depth: float) -> None:
+        """
+        Compute and add the 3D position based on the center of the mask and the provided depth.
+
+        Args:
+            depth (float): The depth (Z-coordinate) of the object in meters.
+
+        """
         if self.mask is None or self.mask.size == 0:
-            self.logger.debug("No mask available for dimension estimation.")
+            self.logger.debug("No mask available for position_3d computation.")
             return
 
         # Get indices where mask is true
         ys, xs = np.where(self.mask)
         self.logger.debug(f"Mask True Indices - ys: {ys.shape}, xs: {xs.shape}")
+
         if xs.size == 0 or ys.size == 0:
-            self.logger.debug("No valid mask regions found.")
+            self.logger.debug("No valid mask regions found for position_3d computation.")
             return
 
-        # Extract depth values at mask locations
-        depth_values = depth_map[ys, xs]
+        # Compute the centroid of the mask
+        centroid_x = np.mean(xs)
+        centroid_y = np.mean(ys)
+        self.logger.debug(f"Computed Centroid - x: {centroid_x}, y: {centroid_y}")
 
-        # Create a valid mask for depth values
-        valid_mask = np.isfinite(depth_values) & (depth_values > 0)
-        self.logger.debug(f"Valid Depth Values Count: {valid_mask.sum()} / {valid_mask.size}")
-
-        # Apply the valid mask to xs, ys, and depth_values
-        xs_valid = xs[valid_mask]
-        ys_valid = ys[valid_mask]
-        zs_valid = depth_values[valid_mask]
-
-        if zs_valid.size == 0:
-            self.logger.debug("No valid depth values after masking.")
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None:
+            self.logger.error("Camera intrinsics (fx, fy, cx, cy) are not set.")
             return
 
-        # Convert pixel coordinates to camera coordinates
-        xs_camera = (xs_valid - self.cx) * zs_valid / self.fx
-        ys_camera = (ys_valid - self.cy) * zs_valid / self.fy
+        # Compute 3D position using camera intrinsics
+        X = float((centroid_x - self.cx) * depth / self.fx)
+        Y = float((centroid_y - self.cy) * depth / self.fy)
+        Z = float(depth)
 
-        self.logger.debug(f"xs_camera shape: {xs_camera.shape}")
-        self.logger.debug(f"ys_camera shape: {ys_camera.shape}")
-        self.logger.debug(f"zs_valid shape: {zs_valid.shape}")
-
-        # Validate depth range (example: 0.5m to 100m)
-        median_depth = np.median(zs_valid)
-        if not (0.5 <= median_depth <= 100.0):
-            self.logger.warning(
-                f"Estimated depth {median_depth:.2f}m for {self.label} is out of realistic range."
-            )
-            return
-
-        # Calculate dimensions
-        width = xs_camera.max() - xs_camera.min()
-        height = ys_camera.max() - ys_camera.min()
-        length = zs_valid.max() - zs_valid.min()
-
-        self.logger.debug(
-            f"Estimated Dimensions - Height: {height:.2f}m, Width: {width:.2f}m, Length: {length:.2f}m"
-        )
-
-        self.dimensions = (height, width, length)
+        self.position_3d = (X, Y, Z)
+        self.logger.debug(f"Computed 3D Position: {self.position_3d}")

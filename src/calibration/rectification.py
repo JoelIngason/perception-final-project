@@ -20,8 +20,7 @@ class Rectifier:
 
         """
         self.calibration_params = calibration_params
-        self.logger = logging.getLogger("autonomous_perception.calibration")
-        self.logger.setLevel(logging.INFO)
+        self.logger = logging.getLogger("autonomous_perception.rectification")
         if not self.logger.hasHandlers():
             handler = logging.StreamHandler()
             formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")

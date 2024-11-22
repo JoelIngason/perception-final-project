@@ -1,82 +1,12 @@
 import logging
 
-import cv2  # For appearance feature comparison
+import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from src.data_loader.dataset import TrackedObject
 from src.detection.detection_result import DetectionResult
-
-
-class KalmanFilter3D:
-    """Kalman Filter for tracking objects in 3D space with a constant acceleration model."""
-
-    def __init__(self, dt: float = 1.0):
-        """
-        Initialize the Kalman Filter.
-
-        Args:
-            dt (float): Time step between measurements.
-        """
-        self.dt = dt
-        # State vector [x, y, z, vx, vy, vz, ax, ay, az]
-        self.x = np.zeros((9, 1))
-        # State transition matrix (constant acceleration model)
-        dt2 = dt**2 / 2
-        self.F = np.array(
-            [
-                [1, 0, 0, dt, 0, 0, dt2, 0, 0],
-                [0, 1, 0, 0, dt, 0, 0, dt2, 0],
-                [0, 0, 1, 0, 0, dt, 0, 0, dt2],
-                [0, 0, 0, 1, 0, 0, dt, 0, 0],
-                [0, 0, 0, 0, 1, 0, 0, dt, 0],
-                [0, 0, 0, 0, 0, 1, 0, 0, dt],
-                [0, 0, 0, 0, 0, 0, 1, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 1],
-            ],
-        )
-        # Observation matrix (we can only observe position)
-        self.H = np.zeros((3, 9))
-        self.H[0, 0] = 1  # x position
-        self.H[1, 1] = 1  # y position
-        self.H[2, 2] = 1  # z position
-        # Process noise covariance
-        q = 1e-2  # Process noise scalar
-        self.Q = q * np.eye(9)
-        # Measurement noise covariance
-        r = 1e-1  # Measurement noise scalar
-        self.R = r * np.eye(3)
-        # Initial estimate error covariance
-        self.P = np.eye(9)
-
-    def predict(self):
-        """Predict the next state."""
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
-
-    def update(self, z: np.ndarray):
-        """
-        Update the state with a new measurement.
-
-        Args:
-            z (np.ndarray): Measurement vector [x, y, z].
-        """
-        z = z.reshape((3, 1))
-        y = z - self.H @ self.x
-        S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x = self.x + K @ y
-        I = np.eye(self.P.shape[0])
-        self.P = (I - K @ self.H) @ self.P
-
-    def get_state(self) -> np.ndarray:
-        """Get the current state estimate."""
-        return self.x.flatten()
-
-    def get_position(self) -> np.ndarray:
-        """Get the predicted 3D position based on the current state."""
-        return self.x[:3].flatten()
+from src.tracking.kalman_filter import KalmanFilter3D
 
 
 class Track3D:
@@ -91,7 +21,7 @@ class Track3D:
         max_age: int,
         min_hits: int,
         projection_matrix: np.ndarray,
-    ):
+    ) -> None:
         """
         Initialize a Track3D object.
 
@@ -101,10 +31,12 @@ class Track3D:
             max_age (int): Maximum frames to keep the track without updates.
             min_hits (int): Minimum number of hits to consider a track as confirmed.
             projection_matrix (np.ndarray): Camera projection matrix (3x4).
+
         """
+        self.logger = logging.getLogger("autonomous_perception.tracker.track3d")
         self.kf = KalmanFilter3D(dt)
         # Initialize state with the detection's 3D position
-        self.kf.x[:3] = np.array(detection.position_3d).reshape((3, 1))
+        self.kf.kf.statePost[:3] = np.array(detection.position_3d).reshape((3, 1))
         self.time_since_update = 0
         self.id = Track3D.count
         Track3D.count += 1
@@ -116,32 +48,36 @@ class Track3D:
         self.bbox = detection.bbox  # Initial bounding box
         self.appearance_feature = detection.appearance_feature
         self.dimensions = detection.dimensions
+        self.mask = detection.mask
         self.max_age = max_age
         self.min_hits = min_hits
         self.confirmed = False
         self.projection_matrix = projection_matrix  # Store the projection matrix
 
     def predict(self):
-        """Predict the next state and check if the object is within image bounds."""
+        """Predict the next state."""
         self.kf.predict()
         self.age += 1
         self.time_since_update += 1
 
         # Check if the predicted position is within image bounds
-        position = self.get_position()
-        if not self.is_within_image_bounds(position):
+        if not self._is_within_image_bounds(self.bbox):
+            self.logger.info(
+                f"Track ID {self.id} predicted outside image bounds: {self.bbox}.",
+            )
             self.time_since_update = self.max_age + 1  # Mark for deletion
 
-    def is_within_image_bounds(self, position):
-        x, y, z = position
-        # Define image boundaries (assuming known image width and height)
-        image_width = 1242  # Replace with actual width
-        image_height = 375  # Replace with actual height
-        if x < 0 or x > image_width or y < 0 or y > image_height:
-            return False
-        return True
+    def _is_within_image_bounds(self, bbox: list[int]) -> bool:
+        """Check if the predicted position is within image bounds."""
+        x1, y1, x2, y2 = bbox
+        x = (x1 + x2) / 2
+        y = (y1 + y2) / 2
 
-    def update(self, detection: DetectionResult | None = None):
+        image_width = 1224
+        image_height = 370
+        return not (x < 0 or x > image_width or y < 0 or y > image_height)
+
+    def update(self, detection: DetectionResult | None = None) -> None:
         """Update the track with a new detection or predict if no detection."""
         if detection is not None:
             self.time_since_update = 0
@@ -154,108 +90,66 @@ class Track3D:
             self.bbox = detection.bbox  # Update bounding box
             self.appearance_feature = detection.appearance_feature
             self.dimensions = detection.dimensions
+            self.mask = detection.mask
             if self.hits >= self.min_hits:
                 self.confirmed = True
         else:
             # No detection, just predict
+            old_position = self.get_position()
             self.predict()
-            # Update the bounding box based on prediction
-            self.bbox = self.get_predicted_bbox()
-
-    def get_state(self) -> np.ndarray:
-        """Get the current state estimate."""
-        return self.kf.get_state()
+            # TODO: predict bounding box, for now just move all the coordinates by the
+            # same amount as the position
+            new_position = self.get_position()
+            delta = new_position - old_position
+            self.bbox = [coord + delta[i] for i, coord in enumerate(self.bbox)]
 
     def get_position(self) -> np.ndarray:
         """Get the predicted 3D position based on the current state."""
-        return self.kf.x[:3].flatten()
+        return self.kf.get_position()
 
     def get_appearance_feature(self) -> np.ndarray:
         """Get the appearance feature of the track."""
-        return self.appearance_feature if self.appearance_feature.size > 0 else np.array([])
-
-    def get_predicted_bbox(self) -> list[int]:
-        """
-        Project the predicted 3D position to 2D and estimate the bounding box.
-
-        Returns:
-            list[int]: Predicted bounding box [x1, y1, x2, y2].
-        """
-        position_3d = self.get_position()
-        X, Y, Z = position_3d
-
-        # Avoid division by zero
-        if Z <= 0:
-            return self.bbox  # Return the last known bbox
-
-        # Create homogeneous coordinates for the 3D position
-        position_3d_hom = np.array([X, Y, Z, 1]).reshape((4, 1))  # Shape: (4,1)
-
-        # Project to 2D using the projection matrix
-        position_2d_hom = self.projection_matrix @ position_3d_hom  # Shape: (3,1)
-        if position_2d_hom[2, 0] == 0:
-            return self.bbox  # Avoid division by zero
-
-        # Convert to Cartesian coordinates
-        x = position_2d_hom[0, 0] / position_2d_hom[2, 0]
-        y = position_2d_hom[1, 0] / position_2d_hom[2, 0]
-
-        # Estimate the size of the bounding box based on object dimensions and depth
-        # Assuming dimensions = [width, height, length] in meters
-        # Adjust the scale factor as needed based on camera calibration
-        scale_factor = 1000  # Example scale factor to convert meters to pixels
-
-        bbox_width = int((self.dimensions[0] / Z) * scale_factor)
-        bbox_height = int((self.dimensions[1] / Z) * scale_factor)
-
-        # Define the bounding box around the projected point
-        x1 = int(x - bbox_width / 2)
-        y1 = int(y - bbox_height / 2)
-        x2 = int(x + bbox_width / 2)
-        y2 = int(y + bbox_height / 2)
-
-        # Optionally, clamp the bbox to image boundaries
-        image_width = 1242  # Replace with actual width
-        image_height = 375  # Replace with actual height
-        x1 = max(0, min(x1, image_width - 1))
-        y1 = max(0, min(y1, image_height - 1))
-        x2 = max(0, min(x2, image_width - 1))
-        y2 = max(0, min(y2, image_height - 1))
-
-        return [x1, y1, x2, y2]
+        return (
+            self.appearance_feature
+            if self.appearance_feature is not None and self.appearance_feature.size > 0
+            else np.array([])
+        )
 
 
 class ObjectTracker:
     """ObjectTracker class to manage object tracking in 3D space."""
 
-    def __init__(self, config: dict, logger: logging.Logger) -> None:
+    def __init__(self, config: dict, calib_params: dict[str, np.ndarray], camera: str) -> None:
         """
         Initialize the ObjectTracker.
 
         Args:
             config (dict): Configuration dictionary for tracking.
-            logger (logging.Logger): Logger for logging messages.
+            calib_params (Dict[str, np.ndarray]): Stereo calibration parameters.
+            camera (str): 'left' or 'right' camera.
+
         """
-        self.logger = logger
+        self.logger = logging.getLogger("autonomous_perception.tracker")
         tracking_config = config.get("tracking", {})
-        self.max_age = tracking_config.get("max_age", 60)  # Increased max_age
-        self.min_hits = tracking_config.get("min_hits", 3)
+        self.max_age = tracking_config.get("max_age", 60)
+        self.min_hits = tracking_config.get("min_hits", 1)  # Lowered from 3 to 1 for debugging
         self.dt = tracking_config.get("dt", 1.0)
         self.tracks: list[Track3D] = []
         self.logger.info(
-            "3D Object Tracker initialized with Kalman Filters (constant acceleration model).",
+            "3D Object Tracker initialized with Kalman Filters (constant velocity model).",
         )
 
         # Retrieve the projection matrix from config
-        # The projection matrix should be a 3x4 numpy array
-        projection_matrix = config.get("projection_matrix", None)
-        if projection_matrix is None:
-            raise ValueError("Projection matrix must be provided in the configuration.")
-        if isinstance(projection_matrix, list):
-            projection_matrix = np.array(projection_matrix)
-        if projection_matrix.shape != (3, 4):
-            raise ValueError("Projection matrix must be of shape (3, 4).")
-        self.projection_matrix = projection_matrix
+        if camera == "left":
+            self.projection_matrix = calib_params.get("P_rect_02")
+        elif camera == "right":
+            self.projection_matrix = calib_params.get("P_rect_03")
+        else:
+            CAMERA_ERROR = "Invalid camera selection"
+            raise ValueError(CAMERA_ERROR)
+
+        if self.projection_matrix is None:
+            self.projection_matrix = np.eye(3, 4, dtype=np.float32)  # Default to identity matrix
 
     def reset(self):
         """Reset the tracker state."""
@@ -270,48 +164,73 @@ class ObjectTracker:
         Update tracks with new detections.
 
         Args:
-            detections (List[DetectionResult]): List of current detections.
+            detections (list[DetectionResult]): list of current detections.
 
         Returns:
-            List[TrackedObject]: List of active tracked objects.
+            list[TrackedObject]: list of active tracked objects.
+
         """
         # Predict new locations of existing tracks
         for track in self.tracks:
             track.predict()
 
-        # Measurement updates
-        matches, unmatched_tracks, unmatched_detections = self.associate_detections_to_tracks(
+        self.logger.debug(f"Predicted {len(self.tracks)} tracks.")
+
+        # Associate detections to tracks
+        matched, unmatched_tracks, unmatched_detections = self.associate_detections_to_tracks(
             detections,
             self.tracks,
         )
+        combined_len = len(matched) + len(unmatched_tracks) + len(unmatched_detections)
+        assert combined_len >= len(
+            self.tracks
+        ), "Some tracks were not considered in the association."
+
+        self.logger.debug(f"Number of matches: {len(matched)}")
+        self.logger.debug(f"Number of unmatched tracks: {len(unmatched_tracks)}")
+        self.logger.debug(f"Number of unmatched detections: {len(unmatched_detections)}")
 
         # Update matched tracks with assigned detections
-        for track_idx, detection_idx in matches:
+        for track_idx, det_idx in matched:
             track = self.tracks[track_idx]
-            detection = detections[detection_idx]
+            detection = detections[det_idx]
             track.update(detection)
+            self.logger.debug(f"Updated Track ID {track.id} with Detection ID {detection}")
 
-        # Update unmatched tracks (no detection)
-        for track_idx in unmatched_tracks:
-            track = self.tracks[track_idx]
-            track.update()  # Pass None implicitly
-
-        # Create new tracks for unmatched detections
-        for detection_idx in unmatched_detections:
-            detection = detections[detection_idx]
-            if all(coord == 0.0 for coord in detection.position_3d):
+        # Handle unmatched detections by creating new tracks
+        for det_idx in unmatched_detections:
+            detection = detections[det_idx]
+            if detection.position_3d is None or all(
+                coord == 0.0 for coord in detection.position_3d
+            ):
+                self.logger.debug(
+                    f"Skipping Detection {detection.class_id} with invalid position_3d.",
+                )
                 continue  # Skip detections with invalid 3D positions
-            track = Track3D(
+            if self.projection_matrix is None:
+                self.logger.warning(
+                    "Projection matrix is missing. Cannot create new tracks without 3D calibration.",
+                )
+                continue
+            new_track = Track3D(
                 detection,
                 self.dt,
                 self.max_age,
                 self.min_hits,
                 self.projection_matrix,
             )
-            self.tracks.append(track)
+            self.tracks.append(new_track)
+            self.logger.debug(
+                f"Created new Track ID {new_track.id} for Detection ID {detection.class_id}",
+            )
 
         # Remove dead tracks
+        before_removal = len(self.tracks)
         self.tracks = [track for track in self.tracks if track.time_since_update <= self.max_age]
+        after_removal = len(self.tracks)
+        removed_tracks = before_removal - after_removal
+        if removed_tracks > 0:
+            self.logger.info(f"Removed {removed_tracks} dead tracks.")
 
         # Prepare output tracked_objects
         tracked_objects = []
@@ -322,15 +241,21 @@ class ObjectTracker:
             tracked_object = TrackedObject(
                 track_id=track.id,
                 bbox=[int(x) for x in track.bbox],
+                confidence=track.confidence,
                 class_id=track.class_id,
                 label=track.label,
+                dimensions=list(track.dimensions) if track.dimensions is not None else [],
                 position_3d=position_3d.tolist(),
-                dimensions=track.dimensions,
+                mask=track.mask,
             )
             tracked_objects.append(tracked_object)
             self.logger.debug(
+                f"Track {track.id}: {track.label} at {position_3d}. Updates: {track.time_since_update}",
+            )
+            self.logger.debug(
                 f"Track ID: {track.id}, Label: {track.label}, Position: {position_3d}, Time since update: {track.time_since_update}",
             )
+        self.logger.debug(f"Tracking {len(tracked_objects)} objects.")
         return tracked_objects
 
     def associate_detections_to_tracks(
@@ -338,7 +263,17 @@ class ObjectTracker:
         detections: list[DetectionResult],
         tracks: list[Track3D],
     ) -> tuple[list[tuple[int, int]], list[int], list[int]]:
-        """Assign detections to tracks using a combined cost of position and appearance."""
+        """
+        Assign detections to tracks using a combined cost of position and appearance.
+
+        Args:
+            detections (list[DetectionResult]): list of current detections.
+            tracks (list[Track3D]): list of existing tracks.
+
+        Returns:
+            tuple[list[tuple[int, int]], list[int], list[int]]: Matched pairs, unmatched tracks, unmatched detections.
+
+        """
         if len(tracks) == 0:
             return [], [], list(range(len(detections)))
         if len(detections) == 0:
@@ -346,15 +281,14 @@ class ObjectTracker:
 
         num_tracks = len(tracks)
         num_detections = len(detections)
-        cost_matrix = np.zeros((num_tracks, num_detections))
+        cost_matrix = np.zeros((num_tracks, num_detections), dtype=np.float32)
 
         for t_idx, track in enumerate(tracks):
-            track_state = track.get_position()
+            track_pos = track.get_position()
             track_feature = track.get_appearance_feature()
             for d_idx, detection in enumerate(detections):
-                detection_position = np.array(detection.position_3d)
-                position_distance = np.linalg.norm(track_state - detection_position)
-
+                det_pos = np.array(detection.position_3d)
+                position_distance = np.linalg.norm(track_pos - det_pos)
                 # Appearance cost
                 detection_feature = detection.appearance_feature
                 if track_feature.size > 0 and detection_feature.size > 0:
@@ -369,13 +303,14 @@ class ObjectTracker:
                     )
                 else:
                     appearance_distance = 1.0  # Maximum cost if features are missing
-
                 # Combined cost
                 cost = position_distance + 0.5 * appearance_distance
                 cost_matrix[t_idx, d_idx] = cost
 
+        self.logger.debug(f"Cost Matrix:\n{cost_matrix}")
+
         # Apply gating to limit associations
-        max_cost = 200.0  # Increased maximum allowed cost for association
+        max_cost = 200.0  # Maximum allowed cost for association
         cost_matrix[cost_matrix > max_cost] = max_cost + 1
 
         # Apply Hungarian algorithm
@@ -384,11 +319,15 @@ class ObjectTracker:
         unmatched_tracks = list(range(num_tracks))
         unmatched_detections = list(range(num_detections))
 
-        for r, c in zip(row_indices, col_indices):
+        for r, c in zip(row_indices, col_indices, strict=False):
             if cost_matrix[r, c] > max_cost:
                 continue
             matches.append((r, c))
             unmatched_tracks.remove(r)
             unmatched_detections.remove(c)
+
+        self.logger.debug(f"Matched: {matches}")
+        self.logger.debug(f"Unmatched Tracks: {unmatched_tracks}")
+        self.logger.debug(f"Unmatched Detections: {unmatched_detections}")
 
         return matches, unmatched_tracks, unmatched_detections

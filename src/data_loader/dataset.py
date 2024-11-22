@@ -9,19 +9,26 @@ import numpy as np
 
 
 @dataclass
-class DetectionResult:
-    """Data class representing a single detection result."""
+class TrackedObject:
+    """Data class representing a tracked object with bounding box, class information, and 3D position."""
 
-    bbox: list[float]  # [x, y, w, h]
+    track_id: int
+    bbox: list[int]  # [left, top, right, bottom]
     confidence: float
     class_id: int
     label: str
-    position_3d: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    image_left: np.ndarray = field(default_factory=lambda: np.zeros((1, 1, 3), dtype=np.uint8))
+    position_3d: list[float]
+    dimensions: list[float]  # [height, width, length]
+    mask: np.ndarray | None = field(default_factory=lambda: np.array([]))  # Full image size mask
 
-    def add_3d_position(self, position: tuple[float, float, float]) -> None:
-        """Add 3D position to the detection."""
-        self.position_3d = position
+    def to_supported_label(self) -> str:
+        """Return the supported label for the object."""
+        MAP = {
+            "car": "Car",
+            "person": "Pedestrian",
+            "bicycle": "Cyclist",
+        }
+        return MAP.get(self.label.lower(), "Unknown")
 
 
 @dataclass
@@ -54,28 +61,6 @@ class Frame:
         return len(self.labels)
 
 
-@dataclass
-class TrackedObject:
-    """Data class representing a tracked object with bounding box, class information, and 3D position."""
-
-    track_id: int
-    bbox: list[int]  # [x, y, w, h]
-    class_id: int
-    label: str
-    position_3d: tuple[float, float, float]
-    dimensions: tuple[float, float, float]
-    oriented_bbox: list[tuple[int, int]] = field(default_factory=list)  # List of points
-
-    def to_supported_label(self) -> str:
-        """Return the supported label for the object."""
-        MAP = {
-            "car": "Car",
-            "person": "Pedestrian",
-            "bicycle": "Cyclist",
-        }
-        return MAP.get(self.label, "Unknown")
-
-
 class DataLoader:
     """Load and process raw and rectified sequences of frames."""
 
@@ -87,12 +72,11 @@ class DataLoader:
             config (Dict): Data configuration dictionary.
 
         """
-        self.raw_sequences_paths = config.get("raw_sequences_path", [])
-        self.rect_sequences_paths = config.get("rect_sequences_path", [])
-        self.calibration_file = config.get("calibration_file", "")
-        self.rectified_images_path = config.get("rectified_images_path", "")
+        self.raw_sequences_paths: list[str] = config.get("raw_sequences_path", [])
+        self.rect_sequences_paths: list[str] = config.get("rect_sequences_path", [])
+        self.calibration_file: str = config.get("calibration_file", "")
+        self.rectified_images_path: str = config.get("rectified_images_path", "")
         self.logger = logging.getLogger("autonomous_perception.data_loader")
-        self.logger.setLevel(logging.INFO)
         if not self.logger.hasHandlers():
             handler = logging.StreamHandler()
             formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -107,11 +91,11 @@ class DataLoader:
             calib_params (Dict[str, np.ndarray]): Calibration parameters.
 
         Returns:
-            Dict[str, List[Frame]]: Dictionsary of rectified sequences with Frame objects.
+            Dict[str, List[Frame]]: Dictionary of rectified sequences with Frame objects.
 
         """
         self.logger.info("Loading rectified sequences")
-        all_frames = {}
+        all_frames: dict[str, list[Frame]] = {}
         for idx, rect_seq_path in enumerate(self.rect_sequences_paths, 1):
             self.logger.info(f"Loading rectified sequence {idx}: {rect_seq_path}")
             frames = self._load_sequence(rect_seq_path, calib_params, rectified=True)
@@ -132,7 +116,7 @@ class DataLoader:
 
         """
         self.logger.info("Loading raw sequences")
-        all_frames = {}
+        all_frames: dict[str, list[Frame]] = {}
         for idx, raw_seq_path in enumerate(self.raw_sequences_paths, 1):
             rect_seq_path = (
                 self.rect_sequences_paths[idx - 1]
@@ -180,7 +164,7 @@ class DataLoader:
         timestamps_right = self._load_timestamps(timestamps_right_path.as_posix())
 
         # Load labels if available
-        labels = self._load_labels(labels_file.as_posix()) if Path.exists(labels_file) else None
+        labels = self._load_labels(labels_file.as_posix()) if Path.exists(labels_file) else []
 
         # Get sorted image files
         image_files_left = self._get_sorted_image_files(images_left_path.as_posix())
@@ -198,23 +182,27 @@ class DataLoader:
             return []
 
         self.logger.debug(f"Number of frames to load from {seq_path}: {num_frames}")
-        frames = []
+        frames: list[Frame] = []
         for i in range(num_frames):
             img_left_file = image_files_left[i]
             img_right_file = image_files_right[i]
             ts_left = timestamps_left[i]
             ts_right = timestamps_right[i]
 
-            img_left = cv2.imread(os.path.join(images_left_path, img_left_file))  # noqa: PTH118
-            img_right = cv2.imread(os.path.join(images_right_path, img_right_file))  # noqa: PTH118
+            img_left = cv2.imread(os.path.join(images_left_path, img_left_file))
+            img_right = cv2.imread(os.path.join(images_right_path, img_right_file))
             if img_left is None or img_right is None:
                 self.logger.error(
-                    f"Failed to load images: {img_left_file}, {img_right_file}. Skipping frame {i + 1}.",  # noqa: E501
+                    f"Failed to load images: {img_left_file}, {img_right_file}. Skipping frame {i + 1}.",
                 )
                 continue
 
             frame_number = self._extract_frame_number(img_left_file)
-            frame_labels = self._get_labels_for_frame(labels, frame_number) if labels else []
+            if frame_number == -1:
+                self.logger.warning(f"Invalid frame number for image {img_left_file}. Skipping.")
+                continue
+
+            frame_labels = self._get_labels_for_frame(labels, frame_number)
 
             frame = Frame(
                 image_left=img_left,
@@ -237,7 +225,7 @@ class DataLoader:
             List[float]: List of timestamps as float seconds since epoch.
 
         """
-        timestamps = []
+        timestamps: list[float] = []
         try:
             with open(filepath) as f:
                 for line_num, line in enumerate(f, 1):
@@ -252,7 +240,7 @@ class DataLoader:
                             dt_str = f"{dt_str}.{micro}"
                         else:
                             dt_str = f"{line}.000000"
-                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S.%f")  # noqa: DTZ007
+                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S.%f")
                         timestamp = dt.timestamp()
                         timestamps.append(timestamp)
                     except ValueError:
@@ -277,7 +265,7 @@ class DataLoader:
             List[Dict]: List of label dictionaries.
 
         """
-        labels = []
+        labels: list[dict] = []
         try:
             with open(labels_file) as f:
                 for line_num, line in enumerate(f, 1):
@@ -295,9 +283,9 @@ class DataLoader:
                             "truncated": float(parts[3]),
                             "occluded": int(parts[4]),
                             "alpha": float(parts[5]),
-                            "bbox": list(map(float, parts[6:10])),
-                            "dimensions": list(map(float, parts[10:13])),
-                            "location": list(map(float, parts[13:16])),
+                            "bbox": list(map(float, parts[6:10])),  # [left, top, right, bottom]
+                            "dimensions": list(map(float, parts[10:13])),  # [height, width, length]
+                            "location": list(map(float, parts[13:16])),  # [x, y, z]
                             "rotation_y": float(parts[16]),
                             "score": float(parts[17]) if len(parts) > 17 else None,
                         }
@@ -328,7 +316,7 @@ class DataLoader:
                 [
                     f
                     for f in os.listdir(image_dir)
-                    if os.path.isfile(os.path.join(image_dir, f))  # noqa: PTH118, PTH113
+                    if os.path.isfile(os.path.join(image_dir, f))
                     and f.lower().endswith(supported_extensions)
                 ],
             )
@@ -371,9 +359,9 @@ class DataLoader:
         """
         try:
             frame_number = int(os.path.splitext(filename)[0])
-            return frame_number  # noqa: TRY300, RET504
+            return frame_number
         except ValueError:
             self.logger.exception(
-                f"Invalid filename format for extracting frame number: {filename}"
+                f"Invalid filename format for extracting frame number: {filename}",
             )
             return -1  # Indicates an invalid frame number
