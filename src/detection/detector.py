@@ -2,6 +2,7 @@ import logging
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 from src.detection.detection_result import DetectionResult
@@ -22,7 +23,9 @@ class ObjectDetector:
             formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._load_model(config)
+        self.model.to(device)
 
         self.calib_params = calib_params
 

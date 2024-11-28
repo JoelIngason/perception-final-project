@@ -1,5 +1,6 @@
 import logging
 import os
+import pickle
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -83,6 +84,10 @@ class DataLoader:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
+        # Add cache directory
+        self.cache_dir = config.get("cache_dir", "cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
+
     def load_sequences_rect(self, calib_params: dict[str, np.ndarray]) -> dict[str, list[Frame]]:
         """
         Load all rectified sequences of frames based on rectified paths.
@@ -95,12 +100,26 @@ class DataLoader:
 
         """
         self.logger.info("Loading rectified sequences")
+
+        cache_file = os.path.join(self.cache_dir, "rect_sequences.pkl")
+        if os.path.exists(cache_file):
+            with open(cache_file, "rb") as f:
+                all_frames = pickle.load(f)
+            self.logger.info(f"Loaded rectified sequences from cache: {cache_file}")
+            return all_frames
+
         all_frames: dict[str, list[Frame]] = {}
         for idx, rect_seq_path in enumerate(self.rect_sequences_paths, 1):
             self.logger.info(f"Loading rectified sequence {idx}: {rect_seq_path}")
             frames = self._load_sequence(rect_seq_path, calib_params, rectified=True)
             all_frames[str(idx)] = frames
             self.logger.info(f"Loaded {len(frames)} rectified frames from sequence {idx}")
+
+        # Cache the loaded sequences
+        with open(cache_file, "wb") as f:
+            pickle.dump(all_frames, f)
+        self.logger.info(f"Rectified sequences cached at: {cache_file}")
+
         self.logger.info(f"Total rectified sequences loaded: {len(all_frames)}")
         return all_frames
 
@@ -116,6 +135,14 @@ class DataLoader:
 
         """
         self.logger.info("Loading raw sequences")
+
+        cache_file = os.path.join(self.cache_dir, "raw_sequences.pkl")
+        if os.path.exists(cache_file):
+            with open(cache_file, "rb") as f:
+                all_frames = pickle.load(f)
+            self.logger.info(f"Loaded raw sequences from cache: {cache_file}")
+            return all_frames
+
         all_frames: dict[str, list[Frame]] = {}
         for idx, raw_seq_path in enumerate(self.raw_sequences_paths, 1):
             rect_seq_path = (
@@ -132,6 +159,12 @@ class DataLoader:
             frames = self._load_sequence(raw_seq_path, calib_params, rectified=False)
             all_frames[str(idx)] = frames
             self.logger.info(f"Loaded {len(frames)} raw frames from sequence {idx}")
+
+        # Cache the loaded sequences
+        with open(cache_file, "wb") as f:
+            pickle.dump(all_frames, f)
+        self.logger.info(f"Raw sequences cached at: {cache_file}")
+
         self.logger.info(f"Total raw sequences loaded: {len(all_frames)}")
         return all_frames
 

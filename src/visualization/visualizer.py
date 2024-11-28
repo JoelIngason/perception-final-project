@@ -159,7 +159,6 @@ class Visualizer:
             x1, y1, x2, y2 = obj.bbox
             label = obj.label
             position_3d = obj.position_3d
-            dimensions = obj.dimensions
 
             # Assign a color based on the object's class
             color = self.class_color_mapping.get(label, self.default_color)
@@ -174,14 +173,10 @@ class Visualizer:
                 f"Y: {position_3d[1]:.2f}m, "
                 f"Z: {position_3d[2]:.2f}m"
             )
-            dimension_text = (
-                f"H: {dimensions[0]:.2f}m, W: {dimensions[1]:.2f}m, L: {dimensions[2]:.2f}m"
-            )
             self.logger.debug(f"{side} Image - {text}")
 
             # Draw texts
             self._draw_label(img, text, x1, y1 - 30, color)
-            self._draw_label(img, dimension_text, x1, y1 - 10, color)
 
             # Check if the object has a mask
             if hasattr(obj, "mask") and obj.mask is not None:

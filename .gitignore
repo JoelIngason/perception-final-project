@@ -11,7 +11,7 @@ __pycache__/
 
 # Models
 *.pt
-*.pth
+
 
 
 # Distribution / packaging

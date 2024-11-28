@@ -109,5 +109,5 @@ def parse_labels(label_file: str) -> dict[int, list[GroundTruthObject]]:
     except Exception as e:
         logger.exception(f"An unexpected error occurred while parsing labels: {e}")
 
-    logger.info(f"Parsed {len(gt_dict)} frames from '{label_file}'.")
+    logger.debug(f"Parsed {len(gt_dict)} frames from '{label_file}'.")
     return gt_dict
