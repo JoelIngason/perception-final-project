@@ -1,17 +1,23 @@
 import logging
+from collections import defaultdict
 
 import cv2
 import numpy as np
 from screeninfo import get_monitors  # To get screen resolution
 
-from src.data_loader.dataset import Frame, TrackedObject
-
 
 class Visualizer:
     """Visualize the frames with tracked objects and a combined depth map using color from both images."""
 
-    def __init__(self):
-        """Initialize the Visualizer with appropriate logging configurations and screen size."""
+    def __init__(self, class_color_mapping=None, default_color=(128, 128, 128)):
+        """
+        Initialize the Visualizer with appropriate logging configurations and screen size.
+
+        Args:
+            class_color_mapping (dict, optional): Mapping from class names or IDs to BGR color tuples.
+            default_color (tuple, optional): Default color for undefined classes.
+
+        """
         self.logger = logging.getLogger("autonomous_perception.visualization")
         if not self.logger.hasHandlers():
             handler = logging.StreamHandler()
@@ -22,15 +28,19 @@ class Visualizer:
         self.track_info = {}
 
         # Define a color mapping based on object classes
-        self.class_color_mapping = {
-            "car": (255, 0, 0),  # Blue
-            "person": (0, 255, 0),  # Green
-            "bicycle": (0, 0, 255),  # Red
-            # Add more classes and colors as needed
-        }
+        self.class_color_mapping = (
+            class_color_mapping
+            if class_color_mapping
+            else {
+                "car": (255, 0, 0),  # Blue
+                "person": (0, 255, 0),  # Green
+                "bicycle": (0, 0, 255),  # Red
+                # Add more classes and colors as needed
+            }
+        )
 
         # Default color for undefined classes
-        self.default_color = (128, 128, 128)  # Gray
+        self.default_color = default_color  # Gray
 
         # Get screen resolution
         self.screen_width, self.screen_height = self.get_screen_resolution()
@@ -56,42 +66,158 @@ class Visualizer:
 
     def display(
         self,
-        frame: Frame,
-        tracked_objects_left: list[TrackedObject],
-        tracked_objects_right: list[TrackedObject],
+        img_left: np.ndarray,
+        img_right: np.ndarray,
+        tracks_active: list,
+        tracks_lost: list,
+        names: dict,
         depth_map: np.ndarray,
-    ) -> bool:
+        conf=True,
+        line_width=2,
+        font_size=0.5,
+        font=cv2.FONT_HERSHEY_SIMPLEX,
+        labels=True,
+        show=True,
+        save=False,
+        filename=None,
+        color_mode="class",
+    ) -> np.ndarray:
         """
         Display the left and right frames with tracked objects and the corresponding depth map.
 
         Args:
-            frame (Frame): The current frame containing left and right images.
-            tracked_objects_left (list[TrackedObject]): Tracked objects in the left image.
-            tracked_objects_right (list[TrackedObject]): Tracked objects in the right image.
-            depth_map (np.ndarray): The depth map derived from the stereo images.
+            img_left (np.ndarray): Original left image as a numpy array.
+            img_right (np.ndarray): Original right image as a numpy array.
+            tracks_active (list): List of active tracks (STrack objects).
+            tracks_lost (list): List of lost tracks (STrack objects).
+            names (dict): Dictionary mapping class IDs to class names.
+            depth_map (np.ndarray): Depth map derived from stereo images.
+            conf (bool): Whether to display confidence scores.
+            line_width (int): Width of bounding box lines.
+            font_size (float): Font scale for class labels.
+            font (int): Font type for class labels.
+            labels (bool): Whether to display class labels.
+            show (bool): Whether to display the annotated image.
+            save (bool): Whether to save the annotated image.
+            filename (str, optional): Name of the file to save the annotated image.
+            color_mode (str): Color mode for bounding boxes ("class" or "instance").
 
         Returns:
-            bool: True to continue displaying, False to exit.
+            (np.ndarray): Annotated image as a numpy array.
 
         """
-        img_left, img_right = frame.images  # Assuming frame.images returns a tuple (left, right)
+        assert color_mode in {
+            "instance",
+            "class",
+        }, f"Expected color_mode='instance' or 'class', not {color_mode}."
 
-        # Draw detections on the left image
-        img_left_display = img_left.copy()
-        self._draw_tracked_objects(img_left_display, tracked_objects_left, side="Left")
+        # Combine confirmed and lost tracks
+        all_tracks = tracks_active + tracks_lost
 
-        # Draw detections on the right image
-        img_right_display = img_right.copy()
-        self._draw_tracked_objects(img_right_display, tracked_objects_right, side="Right")
+        self.logger.debug(f"All tracks: {len(all_tracks)}")
+
+        # Generate a color map for track IDs based on class
+        # Red for pedestrians, green for cyclists, blue for vehicles
+        # pedastrians: 0, cyclists: 1, vehicles: 2
+        if color_mode == "class":
+            colors = {
+                0: (255, 0, 0),  # Red for class ID 0
+                1: (0, 255, 0),  # Green for class ID 1
+                2: (0, 0, 255),  # Blue for class ID 2
+                # Add more class ID mappings as needed
+            }
+        else:
+            # color everything as red
+            colors = defaultdict(lambda: (255, 0, 0))
+
+        annotated_img = img_left.copy()
+
+        for track in all_tracks:
+            # Get bounding box in xyzxy format
+            bbox = track.xyzxy  # [x1, y1, z, x2, y2]
+
+            # Check if depth is available
+            depth = bbox[2] if len(bbox) > 2 else None
+
+            bbox_coords = [bbox[0], bbox[1], bbox[3], bbox[4]]  # [x1, y1, x2, y2]
+            bbox_coords = bbox_coords if isinstance(bbox_coords, list) else bbox_coords.tolist()
+
+            # Cap the bbox values to be within the image and not negative
+            bbox_coords[0] = min(max(0, int(bbox_coords[0])), annotated_img.shape[1] - 1)
+            bbox_coords[1] = min(max(0, int(bbox_coords[1])), annotated_img.shape[0] - 1)
+            bbox_coords[2] = max(min(int(bbox_coords[2]), annotated_img.shape[1] - 1), 0)
+            bbox_coords[3] = max(min(int(bbox_coords[3]), annotated_img.shape[0] - 1), 0)
+
+            if bbox_coords[0] >= bbox_coords[2] or bbox_coords[1] >= bbox_coords[3]:
+                self.logger.debug(f"Invalid bbox for track ID {track.track_id}: {bbox_coords}")
+                continue
+
+            # Get class, score, and track ID
+            cls_id = int(track.cls) if track.cls is not None else -1
+            cls_name = names.get(cls_id, "Unknown") if cls_id != -1 else "Unknown"
+            score = float(track.score) if track.score is not None else 0.0
+            track_id = track.track_id
+
+            # Define label
+            if labels:
+                if depth is not None and depth > 0:
+                    label = (
+                        f"ID:{track_id} {cls_name} {score:.2f} D:{depth:.2f}m"
+                        if conf
+                        else f"ID:{track_id} {cls_name} D:{depth:.2f}m"
+                    )
+                else:
+                    label = (
+                        f"ID:{track_id} {cls_name} {score:.2f}"
+                        if conf
+                        else f"ID:{track_id} {cls_name}"
+                    )
+            else:
+                label = f"ID:{track_id}" if conf else f"ID:{track_id}"
+
+            # Choose color
+            color = colors[cls_id] if cls_id in colors else self.default_color
+
+            # Draw bounding box
+            cv2.rectangle(
+                annotated_img,
+                (bbox_coords[0], bbox_coords[1]),
+                (bbox_coords[2], bbox_coords[3]),
+                color,
+                line_width,
+            )
+
+            # Draw label background
+            if labels:
+                (text_width, text_height), baseline = cv2.getTextSize(label, font, font_size, 1)
+                cv2.rectangle(
+                    annotated_img,
+                    (bbox_coords[0], bbox_coords[1] - text_height - baseline),
+                    (bbox_coords[0] + text_width, bbox_coords[1]),
+                    color,
+                    thickness=cv2.FILLED,
+                )
+                # Determine text color based on rectangle brightness for contrast
+                text_color = (0, 0, 0) if self._is_light_color(color) else (255, 255, 255)
+                cv2.putText(
+                    annotated_img,
+                    label,
+                    (bbox_coords[0], bbox_coords[1] - baseline),
+                    font,
+                    font_size,
+                    text_color,
+                    1,
+                    cv2.LINE_AA,
+                )
 
         # Create a depth heatmap
         depth_heatmap = self._create_depth_heatmap(depth_map)
 
         # Resize depth map to match image widths
-        depth_heatmap_resized = self._resize_depth_map(depth_heatmap, img_left_display.shape[1])
+        depth_heatmap_resized = self._resize_depth_map(depth_heatmap, img_left.shape[1])
 
         # Prepare list of images to stack vertically
-        images_to_stack = [img_left_display, img_right_display, depth_heatmap_resized]
+        images_to_stack = [annotated_img, img_right, depth_heatmap_resized]
 
         # Stack images vertically
         combined_visualization = self._stack_images_vertically(images_to_stack)
@@ -129,98 +255,23 @@ class Visualizer:
                 "Combined visualization fits within screen dimensions. No resizing applied.",
             )
 
+        # Save results
+        if save:
+            if filename is None:
+                filename = "annotated_image.jpg"
+            cv2.imwrite(filename, combined_visualization)
+            self.logger.info(f"Annotated image saved as {filename}")
+
         # Display the combined visualization
-        cv2.imshow("Autonomous Perception", combined_visualization)
+        if show:
+            cv2.imshow("Autonomous Perception", combined_visualization)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                self.logger.info("Exit key pressed. Closing visualization windows.")
+                cv2.destroyAllWindows()
+                return False
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            self.logger.info("Exit key pressed. Closing visualization windows.")
-            cv2.destroyAllWindows()
-            return False
-        return True
-
-    def _draw_tracked_objects(
-        self,
-        img: np.ndarray,
-        tracked_objects: list[TrackedObject],
-        side: str,
-    ):
-        """
-        Draw bounding boxes and labels for tracked objects on the given image.
-
-        Args:
-            img (np.ndarray): The image on which to draw.
-            tracked_objects (list[TrackedObject]): The list of tracked objects.
-            side (str): Indicates whether the image is 'Left' or 'Right' for logging purposes.
-
-        """
-        for obj in tracked_objects:
-            track_id = obj.track_id
-            x1, y1, x2, y2 = obj.bbox
-            label = obj.label
-            position_3d = obj.position_3d
-
-            # Assign a color based on the object's class
-            color = self.class_color_mapping.get(label, self.default_color)
-
-            # Draw bounding box
-            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-
-            # Prepare text labels
-            text = (
-                f"ID {track_id} - {label} - "
-                f"X: {position_3d[0]:.2f}m, "
-                f"Y: {position_3d[1]:.2f}m, "
-                f"Z: {position_3d[2]:.2f}m"
-            )
-            self.logger.debug(f"{side} Image - {text}")
-
-            # Draw texts
-            self._draw_label(img, text, x1, y1 - 30, color)
-
-            # Check if the object has a mask
-            if hasattr(obj, "mask") and obj.mask is not None:
-                mask_coords = np.array(obj.mask)
-                if mask_coords.ndim == 2 and mask_coords.shape[1] == 2:
-                    # Ensure the coordinates are in integer format
-                    mask_polygon = mask_coords.astype(np.int32)
-                    # Draw the filled polygon on the image
-                    cv2.fillPoly(img, [mask_polygon], color)
-                else:
-                    self.logger.warning(
-                        f"Invalid mask format for track ID {track_id} in {side} image. "
-                        f"Expected shape (N, 2), got {obj.mask.shape}",
-                    )
-            else:
-                self.logger.info(f"No mask available for track ID {track_id} in {side} image.")
-
-    def _draw_label(self, img, text, x, y, color):
-        """Helper function to draw a label with background."""
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        thickness = 1
-        text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
-        # Adjust rectangle color based on object class color
-        rectangle_bgr = color
-        cv2.rectangle(
-            img,
-            (x, y - text_size[1]),
-            (x + text_size[0], y + 5),
-            rectangle_bgr,
-            cv2.FILLED,
-        )
-        # Determine text color based on rectangle brightness for contrast
-        text_color = (0, 0, 0) if self._is_light_color(color) else (255, 255, 255)
-        cv2.putText(
-            img,
-            text,
-            (x, y),
-            font,
-            font_scale,
-            text_color,
-            thickness,
-            cv2.LINE_AA,
-        )
+        return combined_visualization
 
     def _is_light_color(self, color):
         """Determine if a BGR color is light based on its luminance."""
@@ -314,7 +365,7 @@ class Visualizer:
             return depth_heatmap_resized
         return depth_heatmap
 
-    def _stack_images_vertically(self, images: list[np.ndarray]) -> np.ndarray:
+    def _stack_images_vertically(self, images: list) -> np.ndarray:
         """
         Stack multiple images vertically, ensuring they all fit within the screen.
 

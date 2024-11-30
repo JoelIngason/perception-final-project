@@ -1,28 +1,171 @@
 import logging
+
+# Check if src is in the PYTHONPATH
 from typing import Any
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from scipy.stats import zscore
 
-from src.detection.detection_result import DetectionResult
+
+def preprocess_image(image: np.ndarray) -> np.ndarray:
+    """
+    Apply histogram equalization to improve contrast.
+
+    Args:
+        image (np.ndarray): Grayscale image.
+
+    Returns:
+        np.ndarray: Preprocessed image.
+
+    """
+    if len(image.shape) != 2:
+        raise ValueError("Input image for preprocessing must be grayscale.")
+    return cv2.equalizeHist(image)
+
+
+def get_non_overlapping_region(
+    disparity: np.ndarray,
+    min_disparity: int,
+    num_disparities: int,
+    width: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Identify non-overlapping regions based on disparity map.
+
+    Args:
+        disparity (np.ndarray): Disparity map.
+        min_disparity (int): Minimum disparity value.
+        num_disparities (int): Number of disparities.
+        width (int): Width of the image.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: Masks for left and right non-overlapping regions.
+
+    """
+    # Create mask for valid disparity (within min and max disparity range)
+    max_disparity = min_disparity + num_disparities
+    valid_mask = (disparity >= min_disparity) & (disparity <= max_disparity)
+
+    # Identify the overlap region (valid disparity region)
+    if np.any(valid_mask):
+        overlap_start = np.argmax(valid_mask.any(axis=0))
+        # To handle cases where valid_mask is all False in reversed
+        reversed_valid_mask = valid_mask[:, ::-1]
+        if np.any(reversed_valid_mask):
+            overlap_end = width - np.argmax(reversed_valid_mask.any(axis=0))
+        else:
+            overlap_end = width
+    else:
+        overlap_start, overlap_end = 0, width
+
+    # Compute the non-overlapping regions
+    left_non_overlap = np.ones_like(valid_mask, dtype=np.uint8)
+    left_non_overlap[:, :overlap_start] = 0  # Non-overlapping part of the left image
+
+    right_non_overlap = np.ones_like(valid_mask, dtype=np.uint8)
+    right_non_overlap[:, overlap_end:] = 0  # Non-overlapping part of the right image
+
+    return left_non_overlap, right_non_overlap
+
+
+def compute_scale_and_shift(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute scale and shift factors to align predicted depth with target.
+
+    Args:
+        prediction (torch.Tensor): Predicted depth.
+        target (torch.Tensor): Target depth.
+        mask (torch.Tensor): Mask indicating valid regions.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Scale and shift tensors.
+
+    """
+    a_00 = torch.sum(mask * prediction * prediction, dim=(1, 2))
+    a_01 = torch.sum(mask * prediction, dim=(1, 2))
+    a_11 = torch.sum(mask, dim=(1, 2))
+
+    b_0 = torch.sum(mask * prediction * target, dim=(1, 2))
+    b_1 = torch.sum(mask * target, dim=(1, 2))
+
+    det = a_00 * a_11 - a_01 * a_01
+    valid = det > 0
+
+    scale = torch.zeros_like(b_0)
+    shift = torch.zeros_like(b_1)
+
+    scale[valid] = (a_11[valid] * b_0[valid] - a_01[valid] * b_1[valid]) / det[valid]
+    shift[valid] = (-a_01[valid] * b_0[valid] + a_00[valid] * b_1[valid]) / det[valid]
+
+    return scale, shift
+
+
+def to_depth(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    depth_cap: float = 80.0,
+) -> np.ndarray:
+    """
+    Transform predicted disparity to aligned depth.
+
+    Args:
+        prediction (torch.Tensor): Predicted depth.
+        target (torch.Tensor): Target depth.
+        mask (torch.Tensor): Mask indicating valid regions.
+        depth_cap (float, optional): Maximum depth value. Defaults to 80.0.
+
+    Returns:
+        np.ndarray: Aligned depth map.
+
+    """
+    # Avoid division by zero
+    target_disparity = torch.zeros_like(target)
+    target_disparity[mask == 1] = 1.0 / target[mask == 1]
+
+    scale, shift = compute_scale_and_shift(prediction, target_disparity, mask)
+    prediction_aligned = scale.view(-1, 1, 1) * prediction + shift.view(-1, 1, 1)
+
+    disparity_cap = 1.0 / depth_cap
+    prediction_aligned[prediction_aligned < disparity_cap] = disparity_cap
+
+    prediction_depth = 1.0 / prediction_aligned
+
+    # Clamp the depth values to the specified cap
+    prediction_depth = prediction_depth.clamp(max=depth_cap)
+
+    return prediction_depth.cpu().numpy()
 
 
 class DepthEstimator:
     """DepthEstimator class to compute disparity maps and estimate depth from stereo images."""
 
-    def __init__(self, calib_params: dict[str, np.ndarray], config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        calib_params: dict[str, np.ndarray],
+        config: dict[str, Any],
+        image_size: tuple[int, int] = (1280, 720),
+    ):
         """
         Initialize the DepthEstimator with calibration parameters and configuration.
 
         Args:
             calib_params (Dict[str, np.ndarray]): Stereo calibration parameters.
             config (Dict[str, Any]): Configuration parameters.
+            image_size (Tuple[int, int], optional): Image size for disparity map computation.
 
         """
         self.logger = logging.getLogger("autonomous_perception.depth_estimation")
         self.calib_params = calib_params
         self.config = config
+        self.image_size = image_size
 
         # Compute focal length and baseline
         try:
@@ -64,8 +207,8 @@ class DepthEstimator:
             self.config["stereo"]["num_disparities"] = num_disparities
 
         # Fine-tuned matching parameters
-        P1 = 8 * 3 * block_size**2
-        P2 = 32 * 3 * block_size**2
+        P1 = stereo_config.get("P1", 8 * 3 * block_size**2)
+        P2 = stereo_config.get("P2", 32 * 3 * block_size**2)
         disp12_max_diff = stereo_config.get("disp12_max_diff", 1)
         uniqueness_ratio = stereo_config.get("uniqueness_ratio", 15)
         speckle_window_size = stereo_config.get("speckle_window_size", 100)
@@ -106,26 +249,31 @@ class DepthEstimator:
 
         """
         try:
-            # Convert images to grayscale if they are not already
-            gray_left = (
-                img_left if len(img_left.shape) == 2 else cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
-            )
-            gray_right = (
-                img_right
-                if len(img_right.shape) == 2
-                else cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
-            )
+            # Convert images to grayscale
+            gray_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
+            gray_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
+
+            # Preprocessing
+            gray_left = preprocess_image(gray_left)
+            gray_right = preprocess_image(gray_right)
 
             # Compute disparity map
             disparity_map = (
                 self.stereo_matcher.compute(gray_left, gray_right).astype(np.float32) / 16.0
             )
+            # Check if disparity map has valid values
+            if np.all(disparity_map <= 0):
+                self.logger.error("Disparity map contains only invalid values.")
+                raise ValueError("Invalid disparity map computed.")
 
             # Post-process disparity map
-            disparity_map = cv2.medianBlur(disparity_map, 5)
             disparity_map[disparity_map <= 0.0] = np.nan  # Mask invalid disparities
 
             self.logger.debug("Disparity map computed successfully.")
+            self.logger.debug(
+                f"Disparity Map Stats: min={np.nanmin(disparity_map)}, max={np.nanmax(disparity_map)}, mean={np.nanmean(disparity_map)}",
+            )
+
             return disparity_map
 
         except Exception as e:
@@ -144,12 +292,20 @@ class DepthEstimator:
 
         """
         try:
-            # Compute depth using the formula: Depth = (focal_length * baseline) / disparity
+            # Compute depth using the formula:
+            # Depth = (focal_length * baseline) / (disparity * image_width + epsilon)
             with np.errstate(divide="ignore", invalid="ignore"):
-                depth_map = (self.focal_length * self.baseline) / disparity_map
+                depth_map = (self.focal_length * self.baseline) / (disparity_map + 1e-6)
                 depth_map[disparity_map <= 0.0] = np.nan  # Mask invalid disparities
+                depth_map[depth_map > 80.0] = np.nan  # Cap depth values at 80m
 
             self.logger.debug("Depth map computed successfully.")
+
+            # Check if depth_map contains valid values
+            if np.all(np.isnan(depth_map)):
+                self.logger.error("Depth map contains only NaN values after computation.")
+                raise ValueError("Invalid depth map computed.")
+
             depth_map = self.refine_depth_map(depth_map)
             return depth_map
 
@@ -159,7 +315,7 @@ class DepthEstimator:
 
     def compute_object_depth(
         self,
-        detection: DetectionResult,
+        bbox: np.ndarray,
         depth_map: np.ndarray,
     ) -> tuple[float, float]:
         """
@@ -168,80 +324,53 @@ class DepthEstimator:
         Uses z-score filtering to exclude depth values that deviate significantly from the mean.
 
         Args:
-            detection (DetectionResult): Detection result containing the object's mask.
+            bbox (np.ndarray): Bounding box coordinates in the format [x1, y1, x2, y2].
             depth_map (np.ndarray): Depth map in meters.
 
         Returns:
             Tuple[float, float]: Median depth and object depth range in meters.
 
         """
-        if not detection.mask.any():
-            self.logger.debug("No mask available for depth computation.")
-            return (-1.0, 0.0)
+        # Extract the object mask from the depth map
+        x, y, w, h = bbox
+        # Find the center of the bounding box and set the mask
+        # as 5 pixels around the center to avoid noise
+        center_x = x + w // 2
+        center_y = y + h // 2
 
-        # Convert mask to NumPy array for efficient processing
-        mask_coords = np.array(detection.mask)
-        if mask_coords.ndim != 2 or mask_coords.shape[1] != 2:
-            self.logger.error("detection.mask should be a 2D array with shape (N, 2).")
-            return (-1.0, 0.0)
+        # Ensure the mask is within the depth map boundaries
+        mask_x_start = int(max(center_x - 5, 0))
+        mask_x_end = int(min(center_x + 5, depth_map.shape[1]))
+        mask_y_start = int(max(center_y - 5, 0))
+        mask_y_end = int(min(center_y + 5, depth_map.shape[0]))
 
-        # Extract x and y coordinates from the mask (1-based indexing)
-        x_coords = mask_coords[:, 0] - 1  # Convert to 0-based indexing
-        y_coords = mask_coords[:, 1] - 1  # Convert to 0-based indexing
+        mask = depth_map[
+            mask_y_start:mask_y_end,
+            mask_x_start:mask_x_end,
+        ]
 
-        # Validate coordinates
-        height, width = depth_map.shape
-        valid_indices = (x_coords >= 0) & (x_coords < width) & (y_coords >= 0) & (y_coords < height)
-        if not np.any(valid_indices):
-            self.logger.warning("All mask coordinates are out of bounds after indexing adjustment.")
-            return (-1.0, 0.0)
+        # Flatten the mask and remove NaN values
+        valid_depths = mask[~np.isnan(mask)]
 
-        # Apply valid indices and convert to integer type for indexing
-        x_coords = x_coords[valid_indices].astype(int)
-        y_coords = y_coords[valid_indices].astype(int)
-
-        # Extract depth values corresponding to the mask
-        try:
-            depth_values = depth_map[y_coords, x_coords]
-        except IndexError as e:
-            self.logger.exception(f"Error accessing depth map with mask coordinates: {e}")
-            return (-1.0, 0.0)
-
-        # Filter out invalid depth values (non-finite or non-positive)
-        valid_depths = depth_values[np.isfinite(depth_values) & (depth_values > 0)]
-        if valid_depths.size == 0:
-            self.logger.warning(f"No valid depth values for detection '{detection.label}'.")
-            return (-1.0, 0.0)
-
-        # Compute z-scores for depth values
+        # Calculate z-scores for the depth values
         z_scores = zscore(valid_depths)
-        if np.isnan(z_scores).all():
-            self.logger.warning(f"Z-score computation failed for detection '{detection.label}'.")
-            return (-1.0, 0.0)
 
         # Exclude outliers with a z-score threshold (e.g., |z| > 2.5)
         z_threshold = self.config.get("stereo", {}).get("z_threshold", 2.5)
         filtered_depths = valid_depths[np.abs(z_scores) <= z_threshold]
 
-        if filtered_depths.size == 0:
-            self.logger.warning(
-                f"All depth values are excluded as outliers for detection '{detection.label}'.",
-            )
-            return (-1.0, 0.0)
-
+        # Make sure there are valid depth values
+        if len(filtered_depths) == 0:
+            self.logger.warning("No valid depth values found in the object mask.")
+            return (np.nan, np.nan)
         # Calculate the median of the filtered depth values
         median_depth = float(np.median(filtered_depths))
-        self.logger.debug(
-            f"Median Depth for '{detection.label}' after excluding outliers: {median_depth:.2f}m",
-        )
 
         # Calculate the depth range of the object (difference between max and min filtered depth)
         object_depth = float(np.max(filtered_depths) - np.min(filtered_depths))
-        self.logger.debug(f"Depth Range for '{detection.label}': {object_depth:.2f}m")
-
         if object_depth > 10.0:
             self.logger.warning(
-                f"Large depth range ({object_depth:.2f}m) detected for object '{detection.label}'.",
+                f"Large depth range ({object_depth:.2f}m) detected for object .",
             )
         return (median_depth, object_depth)
 
@@ -251,7 +380,6 @@ class DepthEstimator:
 
         Techniques include:
             - Bilateral Filtering
-            - Guided Filtering
             - Hole Filling
 
         Args:
@@ -265,16 +393,20 @@ class DepthEstimator:
             refined_depth = depth_map.copy()
 
             # 1. Bilateral Filtering
+            # Replace NaNs with zero for filtering
+            nan_mask = np.isnan(refined_depth)
+            refined_depth[nan_mask] = 0.0
 
-            # Apply bilateral filter
+            # Apply bilateral filter (Note: bilateralFilter does not handle NaNs)
             refined_depth = cv2.bilateralFilter(
-                refined_depth,
+                refined_depth.astype(np.float32),
                 d=9,
                 sigmaColor=75,
                 sigmaSpace=75,
             )
-            refined_depth[depth_map == 0] = np.nan  # Restore NaNs
 
+            # Restore NaNs
+            refined_depth[nan_mask] = np.nan
             self.logger.debug("Bilateral filtering applied to depth map.")
 
             # 2. Hole Filling using Inpainting
@@ -282,14 +414,20 @@ class DepthEstimator:
             invalid_mask = np.isnan(refined_depth).astype(np.uint8) * 255
             if np.any(invalid_mask):
                 # Inpaint using Telea's method
+                # OpenCV inpaint requires 8-bit or 1-channel images; replace NaNs with zero temporarily
+                inpaint_input = np.where(np.isnan(refined_depth), 0, refined_depth).astype(
+                    np.float32,
+                )
                 inpainted_depth = cv2.inpaint(
-                    refined_depth,
+                    inpaint_input,
                     invalid_mask,
                     inpaintRadius=3,
                     flags=cv2.INPAINT_TELEA,
                 )
+
+                # Restore NaNs where inpainting was not possible
+                inpainted_depth[invalid_mask == 255] = np.nan
                 refined_depth = inpainted_depth
-                refined_depth[refined_depth <= 0.0] = np.nan  # Mask invalid disparities again
                 self.logger.debug("Hole filling (inpainting) applied to depth map.")
             else:
                 self.logger.debug("No invalid depth values found. Skipping inpainting.")
@@ -308,42 +446,111 @@ class DepthEstimator:
         save_path: str | None = None,
     ) -> None:
         """
-        Visualize the depth map alongside the original image.
+        Visualize the depth map alongside the original image using Matplotlib.
 
         Args:
             img (np.ndarray): Original rectified left image.
             depth_map (np.ndarray): Refined depth map in meters.
-            window_name (str, optional): Name of the display window.
+            window_name (str, optional): Title for the plot.
             save_path (str, optional): Path to save the visualized depth map image.
 
         """
-        try:
-            # Normalize depth map for visualization
-            depth_min = np.nanmin(depth_map)
-            depth_max = np.nanmax(depth_map)
-            normalized_depth = np.copy(depth_map)
-            normalized_depth[np.isnan(normalized_depth)] = (
-                depth_max  # Replace NaNs for visualization
-            )
-            normalized_depth = cv2.normalize(normalized_depth, None, 0, 255, cv2.NORM_MINMAX)
-            normalized_depth = normalized_depth.astype(np.uint8)
+        # Check if depth_map contains valid values
+        if np.all(np.isnan(depth_map)):
+            self.logger.error("Depth map contains only NaN values. Skipping visualization.")
+            return
 
-            # Apply color map
-            depth_color = cv2.applyColorMap(normalized_depth, cv2.COLORMAP_JET)
+        min_depth = np.nanmin(depth_map)
+        max_depth = np.nanmax(depth_map)
+        print(f"Min depth: {min_depth:.2f} m, Max depth: {max_depth:.2f} m")
 
-            # Overlay depth map on the original image
-            overlay = cv2.addWeighted(img, 0.6, depth_color, 0.4, 0)
+        # Normalize depth values for visualization
+        depth_map = cv2.normalize(
+            depth_map,
+            None,
+            alpha=0,
+            beta=255,
+            norm_type=cv2.NORM_MINMAX,
+        )  # type: ignore
 
-            # Display the overlay
-            cv2.imshow(window_name, overlay)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # Create a color map for depth visualization
+        depth_map_color = cv2.applyColorMap(depth_map, cv2.COLORMAP_JET)
 
-            # Optionally, save the visualization
-            if save_path:
-                cv2.imwrite(save_path, overlay)
-                self.logger.info(f"Depth map visualization saved to {save_path}.")
+        # Resize the depth map to match the image size
+        depth_map_resized = cv2.resize(
+            depth_map_color,
+            (img.shape[1], img.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
 
-        except Exception as e:
-            self.logger.exception(f"Error during depth map visualization: {e}")
-            raise
+        # Visualize the depth map alongside the original image
+        fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+        ax[0].imshow(img)
+        ax[0].set_title("Original Image")
+        ax[0].axis("off")
+
+        ax[1].imshow(depth_map_resized)
+        ax[1].set_title("Depth Map")
+        ax[1].axis("off")
+
+        plt.suptitle(window_name)
+        plt.tight_layout()
+
+        plt.show()
+
+        if save_path:
+            plt.savefig(save_path)
+            self.logger.info(f"Depth map visualization saved at: {save_path}")
+
+
+if __name__ == "__main__":
+    # Example usage of DepthEstimator
+    import yaml
+
+    from src.calibration.stereo_calibration import StereoCalibrator
+
+    config_path = "../../config/config.yaml"
+
+    # Load configuration
+    with open(config_path) as file:
+        config = yaml.safe_load(file)
+    # Load stereo calibration parameters
+    calibration_file = "../../data/34759_final_project_rect/calib_cam_to_cam.txt"
+    calib_params = StereoCalibrator(config).calibrate(calibration_file)
+    # Load stereo images
+    img_left = cv2.imread("../../data/34759_final_project_rect/seq_01/image_02/data/000000.png")
+    img_right = cv2.imread("../../data/34759_final_project_rect/seq_01/image_03/data/000000.png")
+    image_size = (img_left.shape[1], img_left.shape[0])
+    print(f"Image size: {image_size}")
+
+    # Initialize DepthEstimator
+    depth_estimator = DepthEstimator(calib_params, config, image_size)
+
+    if img_left.shape[2] == 3:
+        img_left = cv2.cvtColor(img_left, cv2.COLOR_RGB2BGR)
+    if img_right.shape[2] == 3:
+        img_right = cv2.cvtColor(img_right, cv2.COLOR_RGB2BGR)
+    if img_left is None or img_right is None:
+        raise FileNotFoundError("Input images not found.")
+    # Compute disparity map
+    disparity_map = depth_estimator.compute_disparity_map(img_left, img_right)
+
+    # Compute depth map
+    depth_map = depth_estimator.compute_depth_map(disparity_map)
+
+    # Visualize depth map
+    depth_estimator.visualize_depth_map(
+        img_left,
+        depth_map,
+        window_name="Depth Visualization",
+        save_path="depth_map.png",
+    )
+
+    # Refine depth map
+    refined_depth = depth_estimator.refine_depth_map(depth_map)
+    depth_estimator.visualize_depth_map(
+        img_left,
+        refined_depth,
+        window_name="Refined Depth Visualization",
+        save_path="refined_depth_map.png",
+    )

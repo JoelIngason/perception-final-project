@@ -23,16 +23,12 @@ calibration:
   calibration_file_rect: "data/34759_final_project_rect/calib_cam_to_cam.txt"
 
 # Detection parameters
-detection:
+models:
   classification:
-    model_path: "yolo11m-seg.pt"  # Ensure this model exists or use a valid path
+    path: "src/models/yolov8/best.pt"  # Ensure this model exists or use a valid path
   device: "cuda:0"  # or "cuda:0" if using GPU
   confidence_threshold: 0.4
   nms_threshold: 0.3
-  class_names:
-    - "person"
-    - "car"
-    - "bicycle"
 
 # Tracking parameters
 tracking:

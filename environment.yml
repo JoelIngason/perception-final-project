@@ -8,7 +8,7 @@ channels:
 dependencies:
   - python
   - pip
-  - numpy
+  - numpy<2.0.0
   - pandas
   - scikit-learn
   - scikit-image
@@ -25,3 +25,9 @@ dependencies:
   - ultralytics
   - tensorboard
   - timm
+  - tabulate
+
+  - pip:
+    - roboflow
+    - boxmot
+    - screeninfo

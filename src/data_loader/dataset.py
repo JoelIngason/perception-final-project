@@ -20,7 +20,6 @@ class TrackedObject:
     label: str
     position_3d: list[float]
     dimensions: list[float]  # [height, width, length]
-    mask: np.ndarray | None = field(default_factory=lambda: np.array([]))  # Full image size mask
 
     def to_supported_label(self) -> str:
         """Return the supported label for the object."""

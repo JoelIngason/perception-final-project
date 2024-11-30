@@ -4,12 +4,12 @@ from pathlib import Path
 from ultralytics import YOLO
 
 
-def load_model(model_path: str = "yolov8n.pt") -> YOLO:
+def load_model(model_path: str = "yolov8/best.pt") -> YOLO:
     """
     Load a pretrained YOLO model.
 
     Args:
-        model_path (str, optional): Path to the YOLO weights file. Defaults to "yolov8n.pt".
+        model_path (str, optional): Path to the YOLO weights file. Defaults to "yolov8/best.pt".
 
     Returns:
         YOLO: The loaded YOLO model instance.
@@ -19,10 +19,6 @@ def load_model(model_path: str = "yolov8n.pt") -> YOLO:
 
     """
     logger = logging.getLogger("autonomous_perception.models")
-    # if not Path(model_path).exists():
-    #    msg = f"YOLO model file not found at {model_path}"
-    #    logger.error(msg)
-    #    raise FileNotFoundError(msg)
     logger.info(f"Loading YOLO model from {model_path}")
     return YOLO(model_path, verbose=False)
 
@@ -39,5 +35,5 @@ def get_model(model_path: str | None = None) -> YOLO:
 
     """
     if model_path is None:
-        model_path = str(Path(__file__).parent / "yolov8n.pt")
+        model_path = str(Path(__file__).parent / "yolov8/best.pt")
     return load_model(str(model_path))

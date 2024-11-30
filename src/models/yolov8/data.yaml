@@ -1,0 +1,7 @@
+path: /home/joeli/perception-final-project/src/models/yolov8/merged_dataset
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 3
+names: ['Pedestrian', 'Car', 'Cyclist']

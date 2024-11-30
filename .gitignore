@@ -12,6 +12,8 @@ __pycache__/
 # Models
 *.pt
 
+# pickle files 
+*.pkl
 
 
 # Distribution / packaging
