@@ -1,4 +1,7 @@
+import argparse
+
 import numpy as np
+import yaml
 from scipy.spatial.distance import cdist
 from ultralytics.trackers.basetrack import TrackState
 
@@ -14,7 +17,12 @@ class BYTETracker:
     BYTETracker: A tracking algorithm built on top of YOLOv8 for object detection and tracking.
     """
 
-    def __init__(self, args, frame_rate=30, feature_extractor=None):
+    def __init__(self, frame_rate=30, feature_extractor=None):
+        # load bytetracker.yaml args
+        with open("config/byte_tracker.yaml") as f:
+            args_byte_tracker = yaml.safe_load(f)
+        # convert from key-value to namespace
+        args = argparse.Namespace(**args_byte_tracker)
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
         self.removed_stracks = []  # type: list[STrack]

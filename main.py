@@ -1,15 +1,11 @@
 import argparse
 import logging
 import logging.config
-from collections import defaultdict
-from copy import deepcopy
-from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 import yaml
-from ultralytics.utils.plotting import Annotator
 
 from src.calibration.stereo_calibration import StereoCalibrator
 from src.data_loader.dataset import DataLoader
@@ -17,158 +13,7 @@ from src.depth_estimation.depth_estimator import DepthEstimator
 from src.models.feature_extractor.feature_extractor import FeatureExtractor
 from src.models.model import load_model
 from src.tracking.byte_tracker import BYTETracker
-
-
-def plot(
-    orig_img,
-    tracks_active,
-    tracks_lost,
-    names,
-    conf=True,
-    line_width=10,
-    font_size=20,
-    font="Arial.ttf",
-    pil=False,
-    labels=True,
-    show=False,
-    save=False,
-    filename=None,
-    color_mode="class",
-):
-    """
-    Plot tracking results on an input RGB image.
-
-    Args:
-        orig_img (np.ndarray): Original image as a numpy array.
-        tracks_active (List[Track]): List of confirmed tracks.
-        tracks_lost (List[Track]): List of lost tracks.
-        names (Dict[int, str]): Dictionary mapping class IDs to class names.
-        conf (bool): Whether to display confidence scores.
-        line_width (int): Width of bounding box lines.
-        font_size (float): Font size for class labels.
-        font (str): Font type for class labels.
-        pil (bool): Whether to use the Python Imaging Library (PIL).
-        img (np.ndarray): Image as a numpy array.
-        labels (bool): Whether to display class labels.
-        show (bool): Whether to display the annotated image.
-        save (bool): Whether to save the annotated image.
-        filename (str): Name of the file to save the annotated image.
-        color_mode (str): Color mode for
-
-    Returns:
-        (np.ndarray): Annotated image as a numpy array.
-
-    """
-    assert color_mode in {
-        "instance",
-        "class",
-    }, f"Expected color_mode='instance' or 'class', not {color_mode}."
-    annotator = Annotator(
-        deepcopy(orig_img),
-        line_width=line_width,
-        font_size=font_size,
-        font=font,
-        pil=pil,
-    )
-
-    # Combine confirmed and lost tracks
-    all_tracks = tracks_active + tracks_lost
-
-    print(f"All tracks: {len(all_tracks)}")
-
-    # Generate a color map for track IDs based on class
-    # Red for pedestrians, green for cyclists, blue for vehicles
-    # pedastrians: 0, cyclists: 1, vehicles: 2
-    colours = defaultdict(lambda: (0, 0, 0))
-    if color_mode == "class":
-        colours = {
-            0: (255, 0, 0),  # Red
-            1: (0, 255, 0),  # Green
-            2: (0, 0, 255),  # Blue
-        }
-    else:
-        # color everything as red
-        colours = defaultdict(lambda: (255, 0, 0))
-    for track in all_tracks:
-        # Get bounding box in xyzxy format
-        bbox = track.xyzxy  # [x1, y1, z, x2, y2]
-
-        # Check if depth is available
-        depth = bbox[2] if len(bbox) > 2 else None
-
-        bbox = [bbox[0], bbox[1], bbox[3], bbox[4]]  # [x1, y1, x2, y2]
-        bbox = bbox.tolist() if isinstance(bbox, torch.Tensor) else bbox
-
-        # Cap the bbox values to be within the image and not negative
-        bbox[0] = min(max(0, bbox[0]), orig_img.shape[1])
-        bbox[1] = min(max(0, bbox[1]), orig_img.shape[0])
-        bbox[2] = max(min(orig_img.shape[1], bbox[2]), 0)
-        bbox[3] = max(min(orig_img.shape[0], bbox[3]), 0)
-
-        if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
-            continue
-
-        # Get class, score, and track ID
-        cls_id = int(track.cls) if track.cls is not None else -1
-        cls_name = names.get(cls_id, "Unknown") if cls_id != -1 else "Unknown"
-        score = float(track.score) if track.score is not None else 0.0
-        track_id = track.track_id
-
-        # Define label
-        if labels:
-            if depth is not None and depth > 0:
-                label = (
-                    f"ID:{track_id} {cls_name} {score:.2f} D: {depth:.2f}"
-                    if conf
-                    else f"ID:{track_id} {cls_name} D: {depth:.2f}"
-                )
-            else:
-                label = (
-                    f"ID:{track_id} {cls_name} {score:.2f}" if conf else f"ID:{track_id} {cls_name}"
-                )
-        else:
-            label = f"ID:{track_id}" if conf else f"ID:{track_id}"
-
-        # Choose color
-        color = colours[cls_id]
-
-        # Draw bounding box
-        annotator.box_label(bbox, label, color=color)
-
-        # Optionally, draw track history
-        # We use draw_centroid_and_tracks
-        bboxes = track.history.values()
-        print(f"Track {track_id} has {len(bboxes)} history entries.")
-        points_to_draw = []
-        for bbox in bboxes:
-            # Get centroid of bbox
-            x, y, z, w, h = bbox  # top-left x, top-left y, z, width, height
-            x_center = x + w / 2
-            y_center = y + h / 2
-
-            # If the centroid is outside the image, skip
-            if (
-                x_center < 0
-                or x_center >= orig_img.shape[1]
-                or y_center < 0
-                or y_center >= orig_img.shape[0]
-            ):
-                continue
-
-            points_to_draw.append((x_center, y_center))
-
-        # Remove all but the last 10 points
-        points_to_draw = points_to_draw[-10:]
-        if len(points_to_draw) > 0:
-            annotator.draw_centroid_and_tracks(points_to_draw, color=color)
-
-    # Save results
-    if save:
-        if filename is None:
-            filename = "annotated_" + Path("annotated_image.jpg").name
-        annotator.save(filename)
-
-    return annotator.result()
+from src.visualization.visualizer import Visualizer
 
 
 def setup_logger(name: str, config_file: str | None = None) -> logging.Logger:
@@ -218,12 +63,10 @@ def run(config_path: str) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     feature_extractor = FeatureExtractor(device=device)
 
-    # load bytetracker.yaml args
-    with open("byte_tracker.yaml") as f:
-        args_byte_tracker = yaml.safe_load(f)
-    # convert from key-value to namespace
-    args_byte_tracker = argparse.Namespace(**args_byte_tracker)
-    tracker = BYTETracker(args_byte_tracker, frame_rate=10, feature_extractor=feature_extractor)
+    tracker = BYTETracker(frame_rate=10, feature_extractor=feature_extractor)
+
+    # Initialize Visualizer
+    visualizer = Visualizer()
 
     # Make OpenCV window resizable
     cv2.namedWindow("Autonomous Perception", cv2.WINDOW_NORMAL)
@@ -243,7 +86,7 @@ def run(config_path: str) -> None:
 
             # Perform object detection
             results = yolo(img_left)[0].boxes.cpu().numpy()
-            print(f"Frame {frame_idx}: {len(results)} detections.")
+            logger.debug(f"Frame {frame_idx}: {len(results)} detections.")
 
             # Add zs to detection results
             # Assuming results have xywh format: [x_center, y_center, width, height]
@@ -295,19 +138,22 @@ def run(config_path: str) -> None:
             tracks_lost = tracker.lost_stracks
             tracks_active = tracker.tracked_stracks
 
-            print(
+            logger.debug(
                 f"Frame {frame_idx}: {len(tracks_active)} active tracks, {len(tracks_lost)} lost tracks.",
             )
 
-            # Annotate frame with tracks
-            annotated_frame = plot(
-                orig_img=img_left,
+            # Annotate frame with tracks using Visualizer
+            annotated_frame = visualizer.display(
+                img_left=img_left,
+                img_right=img_right,
                 tracks_active=tracks_active,
                 tracks_lost=tracks_lost,
                 names=names,
+                depth_map=depth_map,
                 conf=True,
                 line_width=2,
-                font_size=15,
+                font_size=0.5,
+                font=cv2.FONT_HERSHEY_SIMPLEX,
                 labels=True,
                 show=True,  # Set to True to display the annotated image
                 save=False,  # Set to True to save the annotated image
@@ -315,15 +161,10 @@ def run(config_path: str) -> None:
                 color_mode="class",
             )
 
-            # Display the annotated frame
-            cv2.imshow("Autonomous Perception", annotated_frame)
-
-            # Handle exit key
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                print("Exit key pressed. Closing visualization windows.")
-                cv2.destroyAllWindows()
-                return  # Exit the run function
+            # Optionally, handle the return value if needed
+            if annotated_frame is False:
+                # Visualization requested exit
+                return
 
     # Release resources and close windows
     cv2.destroyAllWindows()
