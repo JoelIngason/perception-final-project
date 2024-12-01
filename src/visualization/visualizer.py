@@ -6,6 +6,21 @@ import numpy as np
 from screeninfo import get_monitors  # To get screen resolution
 
 
+def is_light_color(color):
+    """
+    Determine if a BGR color is light based on its luminance.
+
+    Args:
+        color (tuple): BGR color tuple.
+
+    Returns:
+        bool: True if the color is light, False otherwise.
+
+    """
+    luminance = 0.299 * color[2] + 0.587 * color[1] + 0.114 * color[0]
+    return luminance > 186  # Threshold for light colors
+
+
 class Visualizer:
     """Visualize the frames with tracked objects and a combined depth map using color from both images."""
 
@@ -88,7 +103,7 @@ class Visualizer:
 
         Args:
             img_left (np.ndarray): Original left image as a numpy array.
-            img_right (np.ndarray): Original right image as a numpy array.
+            img_right (np.ndarray): Annotated left image with ground truth as a numpy array.
             tracks_active (list): List of active tracks (STrack objects).
             tracks_lost (list): List of lost tracks (STrack objects).
             names (dict): Dictionary mapping class IDs to class names.
@@ -102,6 +117,7 @@ class Visualizer:
             save (bool): Whether to save the annotated image.
             filename (str, optional): Name of the file to save the annotated image.
             color_mode (str): Color mode for bounding boxes ("class" or "instance").
+            centroids (List[List[float]]): List of centroids for detected objects.
 
         Returns:
             (np.ndarray): Annotated image as a numpy array.
@@ -202,7 +218,7 @@ class Visualizer:
                     thickness=cv2.FILLED,
                 )
                 # Determine text color based on rectangle brightness for contrast
-                text_color = (0, 0, 0) if self._is_light_color(color) else (255, 255, 255)
+                text_color = (0, 0, 0) if is_light_color(color) else (255, 255, 255)
                 cv2.putText(
                     annotated_img,
                     label,
@@ -220,9 +236,6 @@ class Visualizer:
         # draw centroids on depth map
         for centroid in centroids:
             cv2.circle(depth_heatmap, (int(centroid[0]), int(centroid[1])), 5, (0, 255, 0), -1)
-
-        # Resize depth map to match image widths
-        # depth_heatmap_resized = self._resize_depth_map(depth_heatmap, img_left.shape[1])
 
         # Prepare list of images to stack vertically
         images_to_stack = [annotated_img, img_right, depth_heatmap]

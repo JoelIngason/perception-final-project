@@ -81,6 +81,9 @@ def parse_labels(label_file: str) -> dict[int, list[GroundTruthObject]]:
                     location = list(map(float, parts[13:16]))  # [x, y, z]
                     rotation_y = float(parts[16])
 
+                    # Optionally capture the 18th column if present
+                    score = float(parts[17]) if len(parts) > 17 else 0.0
+
                     gt_obj = GroundTruthObject(
                         frame=frame,
                         track_id=track_id,
@@ -92,7 +95,7 @@ def parse_labels(label_file: str) -> dict[int, list[GroundTruthObject]]:
                         dimensions=dimensions,
                         location=location,
                         rotation_y=rotation_y,
-                        score=0.0,  # Ground truth does not have a score
+                        score=score,  # Ground truth does not use score
                     )
 
                     if frame not in gt_dict:

@@ -13,22 +13,21 @@ import numpy as np
 class TrackedObject:
     """Data class representing a tracked object with bounding box, class information, and 3D position."""
 
-    track_id: int
-    bbox: list[int]  # [left, top, right, bottom]
-    confidence: float
-    class_id: int
-    label: str
-    position_3d: list[float]
-    dimensions: list[float]  # [height, width, length]
-
-    def to_supported_label(self) -> str:
-        """Return the supported label for the object."""
-        MAP = {
-            "car": "Car",
-            "person": "Pedestrian",
-            "bicycle": "Cyclist",
-        }
-        return MAP.get(self.label.lower(), "Unknown")
+    track_id: int | None = None
+    bbox: list[int] | None = None  # [left, top, right, bottom]
+    confidence: float | None = None
+    class_id: int | None = None
+    label: str | None = None
+    position_3d: list[float] | None = None
+    dimensions: list[float] | None = None  # [height, width, length]
+    # For tuner only
+    frame_idx: int | None = None
+    depth: float | None = None
+    centroid: list[int] | None = None
+    score: float | None = None
+    cls: int | None = None
+    sequence: str | None = None
+    orig_img: np.ndarray | None = None
 
 
 @dataclass

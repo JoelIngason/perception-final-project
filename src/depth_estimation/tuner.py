@@ -1,10 +1,13 @@
 import logging
 import sys
+from calendar import c
 from typing import Any
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import optuna
+from sympy import im
 
 sys.path.append("")
 from src.utils.label_parser import GroundTruthObject
@@ -85,37 +88,20 @@ class DepthEstimator:
         speckle_window_size = stereo_config.get("speckle_window_size", 100)
         speckle_range = stereo_config.get("speckle_range", 32)
         pre_filter_cap = stereo_config.get("pre_filter_cap", 63)
-        mode = cv2.STEREO_SGBM_MODE_SGBM_3WAY
 
         # Initialize StereoSGBM matcher
         try:
-            # self.stereo_matcher = cv2.StereoSGBM.create(
-            #    minDisparity=min_disparity,
-            #    numDisparities=num_disparities,
-            #    blockSize=block_size,
-            #    P1=P1,
-            #    P2=P2,
-            #    disp12MaxDiff=disp12_max_diff,
-            #    uniquenessRatio=uniqueness_ratio,
-            #    speckleWindowSize=speckle_window_size,
-            #    speckleRange=speckle_range,
-            #    preFilterCap=pre_filter_cap,
-            #    mode=mode,
-            # )
-            window_size = 3
-            min_disp = 6
-            num_disp = 112 - min_disp
-            # TODO tweak params
             self.stereo_matcher = cv2.StereoSGBM.create(
-                minDisparity=min_disp,
-                numDisparities=num_disp,
-                blockSize=16,
-                P1=8 * 3 * window_size**2,
-                P2=32 * 3 * window_size**2,
-                disp12MaxDiff=1,
-                uniquenessRatio=10,
-                speckleWindowSize=100,
-                speckleRange=32,
+                minDisparity=min_disparity,
+                numDisparities=num_disparities,
+                blockSize=block_size,
+                P1=P1,
+                P2=P2,
+                disp12MaxDiff=disp12_max_diff,
+                uniquenessRatio=uniqueness_ratio,
+                speckleWindowSize=speckle_window_size,
+                speckleRange=speckle_range,
+                preFilterCap=pre_filter_cap,
             )
             self.logger.info("StereoSGBM matcher initialized with parameters.")
         except Exception as e:
@@ -295,8 +281,8 @@ class DepthEstimator:
             peak_index = np.argmax(hist)
             peak_value = (bin_edges[peak_index] + bin_edges[peak_index + 1]) / 2
 
-            if peak_value > 50.0:
-                self.logger.warning(f"Large depth value ({peak_value:.2f}m) detected for object.")
+            # if peak_value > 50.0:
+            #    self.logger.warning(f"Large depth value ({peak_value:.2f}m) detected for object.")
 
             return (peak_value, [x, y])
         except Exception as e:
@@ -359,33 +345,28 @@ class DepthEstimator:
 
     def evaluate_depth_estimation(
         self,
-        image_paths_left: list[str],
-        image_paths_right: list[str],
+        images_left: list[np.ndarray],
+        images_right: list[np.ndarray],
         labels: dict[int, list[GroundTruthObject]],
         show: bool = False,
-    ) -> None:
+    ) -> float:
         """
         Evaluate the depth estimation against ground truth labels.
 
         Args:
-            image_paths_left (List[str]): List of file paths to left images.
-            image_paths_right (List[str]): List of file paths to right images.
+            images_left (List[np.ndarray]): List of left stereo images.
+            images_right (List[np.ndarray]): List of right stereo images.
             labels (Dict): Ground truth labels for object depth.
             show (bool): Whether to display images and plots.
 
-        """
-        import matplotlib.pyplot as plt
+        Returns:
+            float: Overall mean depth error.
 
+        """
         errors = []
         disparities_vs_depths = []
 
-        for idx, (left_path, right_path) in enumerate(
-            zip(image_paths_left, image_paths_right, strict=False),
-        ):
-            # Load images
-            img_left = cv2.imread(left_path)
-            img_right = cv2.imread(right_path)
-
+        for idx, (img_left, img_right) in enumerate(zip(images_left, images_right, strict=False)):
             if img_left is None or img_right is None:
                 self.logger.error(f"Could not read images at index {idx}")
                 continue
@@ -395,6 +376,9 @@ class DepthEstimator:
 
             # Compute depth map
             depth_map = self.compute_depth_map(disparity_map, img_left)
+
+            # Refine depth map
+            depth_map = self.refine_depth_map(depth_map)
 
             frame_errors = []
             current_labels = labels[idx] if idx in labels else []
@@ -473,101 +457,167 @@ class DepthEstimator:
             plt.title("Inverse Estimated Depth vs Ground Truth Depth")
             plt.show()
 
-    def visualize_depth_map(
+        return overall_mean_error
+
+
+import numpy as np
+
+# Assuming DepthEstimator and other necessary classes are already imported
+
+
+class HyperparameterTuner:
+    def __init__(
         self,
-        img: np.ndarray,
-        depth_map: np.ndarray,
-        window_name: str = "Depth Map",
-        save_path: str | None = None,
-    ) -> None:
+        calib_params: dict[str, np.ndarray],
+        config: dict[str, Any],
+        images_left: list[np.ndarray],
+        images_right: list[np.ndarray],
+        labels: dict[int, list[GroundTruthObject]],
+        logger: logging.Logger,
+        n_trials: int = 50,
+        timeout: int = None,
+    ):
         """
-        Visualize the depth map alongside the original image using Matplotlib.
+        Initialize the HyperparameterTuner.
 
         Args:
-            img (np.ndarray): Original rectified left image.
-            depth_map (np.ndarray): Refined depth map in meters.
-            window_name (str, optional): Title for the plot.
-            save_path (str, optional): Path to save the visualized depth map image.
+            calib_params (dict[str, np.ndarray]): Calibration parameters.
+            config (dict[str, Any]): Configuration dictionary.
+            images_left (List[np.ndarray]): Left stereo images.
+            images_right (List[np.ndarray]): Right stereo images.
+            labels (Dict[int, List[GroundTruthObject]]): Ground truth labels.
+            logger (logging.Logger): Logger instance.
+            n_trials (int, optional): Number of optimization trials.
+            timeout (int, optional): Time limit for optimization in seconds.
 
         """
-        if np.all(np.isnan(depth_map)):
-            self.logger.error("Depth map contains only NaN values. Skipping visualization.")
-            return
+        self.calib_params = calib_params
+        self.config = config
+        self.images_left = images_left
+        self.images_right = images_right
+        self.labels = labels
+        self.logger = logger
+        self.n_trials = n_trials
+        self.timeout = timeout
 
-        min_depth = np.nanmin(depth_map)
-        max_depth = np.nanmax(depth_map)
-        self.logger.info(f"Depth Map Stats: min={min_depth:.2f} m, max={max_depth:.2f} m")
+    def objective(self, trial: optuna.Trial) -> float:
+        """
+        Objective function for Optuna.
 
-        # Normalize depth values for visualization
-        depth_normalized = cv2.normalize(
-            depth_map,
-            None,
-            alpha=0,
-            beta=255,
-            norm_type=cv2.NORM_MINMAX,
-            dtype=cv2.CV_8U,
+        Args:
+            trial (optuna.Trial): Optuna trial object.
+
+        Returns:
+            float: Mean depth estimation error.
+
+        """
+        # Suggest hyperparameters
+        stereo_config = {}
+        stereo_config["min_disparity"] = trial.suggest_int("min_disparity", 0, 70)
+        stereo_config["num_disparities"] = trial.suggest_int("num_disparities", 16, 512, step=16)
+        stereo_config["block_size"] = trial.suggest_int("block_size", 3, 21, step=2)  # must be odd
+
+        # P1 and P2 depend on block_size
+        window_size = stereo_config["block_size"]
+        stereo_config["P1"] = trial.suggest_int(
+            "P1",
+            4 * 3 * window_size**2,
+            42 * 3 * window_size**2,
+        )
+        stereo_config["P2"] = trial.suggest_int(
+            "P2",
+            8 * 3 * window_size**2,
+            192 * 3 * window_size**2,
         )
 
-        # Apply color mapping
-        depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+        stereo_config["disp12_max_diff"] = trial.suggest_int("disp12_max_diff", 0, 50)
+        stereo_config["uniqueness_ratio"] = trial.suggest_int("uniqueness_ratio", 1, 20)
+        stereo_config["speckle_window_size"] = trial.suggest_int("speckle_window_size", 5, 200)
+        stereo_config["speckle_range"] = trial.suggest_int("speckle_range", 1, 64)
+        stereo_config["pre_filter_cap"] = trial.suggest_int("pre_filter_cap", 5, 63)
 
-        # Resize depth map to match image size if necessary
-        if depth_colored.shape[:2] != img.shape[:2]:
-            self.logger.warning(
-                f"Resizing depth map from {depth_colored.shape[:2]} to {img.shape[:2]}.",
+        # Update config with suggested hyperparameters
+        config_copy = self.config.copy()
+        config_copy["stereo"] = stereo_config
+
+        # Initialize DepthEstimator with current hyperparameters
+        depth_estimator = DepthEstimator(
+            calib_params=self.calib_params,
+            config=config_copy,
+            image_size=self.config.get("image_size", (1280, 720)),
+            baseline_correction_factor=self.config.get("baseline_correction_factor", 1.0),
+        )
+
+        # Evaluate depth estimation without showing plots
+        # Suppress logging during trials to reduce verbosity
+        original_level = self.logger.level
+        self.logger.setLevel(logging.WARNING)
+        try:
+            # Retrieve the overall mean error
+            overall_mean_error = depth_estimator.evaluate_depth_estimation(
+                self.images_left,
+                self.images_right,
+                self.labels,
+                show=False,
             )
-            depth_colored = cv2.resize(
-                depth_colored,
-                (img.shape[1], img.shape[0]),
-                interpolation=cv2.INTER_NEAREST,
-            )
+        except Exception as e:
+            self.logger.error(f"Trial failed with exception: {e}")
+            return float("inf")  # Assign a large error to failed trials
+        finally:
+            self.logger.setLevel(original_level)
 
-        # Plotting
-        fig, ax = plt.subplots(1, 2, figsize=(15, 7))
-        ax[0].imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        ax[0].set_title("Original Image")
-        ax[0].axis("off")
+        return overall_mean_error
 
-        ax[1].imshow(cv2.cvtColor(depth_colored, cv2.COLOR_BGR2RGB))
-        ax[1].set_title("Depth Map")
-        ax[1].axis("off")
+    def tune(self) -> optuna.Study:
+        """
+        Run the hyperparameter tuning.
 
-        plt.suptitle(window_name)
-        plt.tight_layout()
+        Returns:
+            optuna.Study: The Optuna study object after optimization.
 
-        if save_path:
-            plt.savefig(save_path)
-            self.logger.info(f"Depth map visualization saved at: {save_path}")
+        """
+        study = optuna.create_study(
+            direction="minimize",
+            study_name="DepthEstimator_Hyperparameter_Tuning",
+            sampler=optuna.samplers.TPESampler(seed=42),
+        )
+        study.optimize(
+            self.objective,
+            n_trials=self.n_trials,
+            timeout=self.timeout,
+            n_jobs=8,
+            show_progress_bar=True,
+        )
+        self.logger.info(
+            f"Study completed. Best trial: {study.best_trial.number} with error {study.best_trial.value:.4f}",
+        )
+        self.logger.info("Best hyperparameters:")
+        for key, value in study.best_trial.params.items():
+            self.logger.info(f"  {key}: {value}")
+        return study
 
-        plt.show()
-
-
-# The rest of your code remains unchanged, including the StereoCalibrator class
-# and the main execution block.
 
 if __name__ == "__main__":
+    import logging
     import sys
+    from pathlib import Path
 
     import yaml
 
-    # Find the path to the StereoCalibrator class
-    sys.path.append("")
     from src.calibration.stereo_calibration import StereoCalibrator
+    from src.data_loader.dataset import DataLoader
     from src.utils.label_parser import parse_labels
 
     # Configure logging
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,  # Set to INFO to reduce verbosity during tuning
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    logger = logging.getLogger("Main")
 
-    from pathlib import Path
-
-    # Paths (Update these paths according to your directory structure)
+    # Paths
     config_path = "config/config.yaml"
     calibration_file = "data/34759_final_project_rect/calib_cam_to_cam.txt"
-    images_left_dir = "data/34759_final_project_rect/seq_01/image_02/data/"
-    images_right_dir = "data/34759_final_project_rect/seq_01/image_03/data/"
     labels_file = "data/34759_final_project_rect/seq_01/labels.txt"
 
     # Load configuration
@@ -580,21 +630,59 @@ if __name__ == "__main__":
     calibrator = StereoCalibrator(config)
     calib_params = calibrator.calibrate(calibration_file)
 
-    # Load image paths
-    image_paths_left = sorted(Path(images_left_dir).glob("*.png"))
-    image_paths_right = sorted(Path(images_right_dir).glob("*.png"))
-    image_paths_left = [str(p) for p in image_paths_left]
-    image_paths_right = [str(p) for p in image_paths_right]
+    # Load images
+    data_loader = DataLoader(config)
+    images = data_loader.load_sequences_rect(calib_params=calib_params)
+    images_left = [frame.image_left for frame in images["1"]]
+    images_right = [frame.image_right for frame in images["1"]]
 
     # Load labels
     labels = parse_labels(labels_file)
-    # Initialize DepthEstimator
+
+    # Initialize DepthEstimator with initial config
     depth_estimator = DepthEstimator(calib_params, config)
 
-    # Evaluate depth estimation
-    depth_estimator.evaluate_depth_estimation(
-        image_paths_left,
-        image_paths_right,
+    # Optional: Split data into training and validation sets
+    tuning_labels = {idx: labels[idx] for idx in range(0, len(images_left), 10)}
+    images_left = images_left[:100]
+    images_right = images_right[:100]
+
+    # Initialize HyperparameterTuner
+    tuner = HyperparameterTuner(
+        calib_params=calib_params,
+        config=config,
+        images_left=images_left,
+        images_right=images_right,
+        labels=tuning_labels,
+        logger=logger,
+        n_trials=1000,  # Adjust the number of trials as needed
+    )
+
+    # Run hyperparameter tuning
+    study = tuner.tune()
+
+    # Retrieve the best hyperparameters
+    best_params = study.best_trial.params
+    logger.info("Best hyperparameters found:")
+    for key, value in best_params.items():
+        logger.info(f"  {key}: {value}")
+
+    # Update the config with the best hyperparameters
+    config["stereo"] = best_params
+
+    # Save the updated configuration for future use
+    tuned_config_path = "config/tuned_config.yaml"
+    with open(tuned_config_path, "w") as file:
+        yaml.dump(config, file)
+    logger.info(f"Tuned configuration saved to {tuned_config_path}")
+
+    # Initialize DepthEstimator with tuned hyperparameters
+    tuned_depth_estimator = DepthEstimator(calib_params, config)
+
+    # Perform final evaluation with tuned parameters
+    tuned_depth_estimator.evaluate_depth_estimation(
+        images_left,
+        images_right,
         labels,
-        show=True,
+        show=True,  # Set to True to visualize results
     )

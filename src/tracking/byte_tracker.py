@@ -22,7 +22,7 @@ class BYTETracker:
 
     def __init__(
         self,
-        config_path: str = "config/byte_tracker.yaml",
+        config_path: str | argparse.Namespace = "config/byte_tracker.yaml",
         frame_rate: int = 30,
         feature_extractor: FeatureExtractor | None = None,
     ):
@@ -35,7 +35,10 @@ class BYTETracker:
             feature_extractor (Optional): Instance of a feature extractor.
 
         """
-        self.args = self.load_config(config_path)
+        if isinstance(config_path, str):
+            self.args = self.load_config(config_path)
+        else:
+            self.args = config_path
         self.tracked_stracks: list[STrackFeature] = []
         self.lost_stracks: list[STrackFeature] = []
         self.removed_stracks: list[STrackFeature] = []
@@ -542,6 +545,7 @@ class BYTETracker:
 
         Returns:
             List[STrackFeature]: Activated stracks.
+
         """
         for idet in u_detection:
             track = detections_high[idet]

@@ -26,7 +26,21 @@ from src.utils.label_parser import GroundTruthObject, parse_labels
 from src.visualization.visualizer import Visualizer
 
 
-# Define the TrackedObject data class if not already defined
+def is_light_color(color):
+    """
+    Determine if a BGR color is light based on its luminance.
+
+    Args:
+        color (tuple): BGR color tuple.
+
+    Returns:
+        bool: True if the color is light, False otherwise.
+    """
+    luminance = 0.299 * color[2] + 0.587 * color[1] + 0.114 * color[0]
+    return luminance > 186  # Threshold for light colors
+
+
+# Define the TrackedObject data class
 @dataclass
 class TrackedObject:
     track_id: int
@@ -279,10 +293,64 @@ def run(config_path: str) -> None:
                 # Evaluate the current frame
                 evaluator.evaluate(tracked_objects, gt_objects)
 
+                # Create a copy of img_left and draw ground truth boxes
+                img_left_gt = img_left.copy()
+
+                for gt_obj in gt_objects:
+                    bbox = gt_obj.bbox  # [left, top, right, bottom]
+                    cls_name = gt_obj.obj_type
+
+                    # Define color for ground truth (e.g., Yellow)
+                    gt_color = (0, 255, 255)  # Yellow in BGR
+
+                    # Draw bounding box
+                    cv2.rectangle(
+                        img_left_gt,
+                        (int(bbox[0]), int(bbox[1])),
+                        (int(bbox[2]), int(bbox[3])),
+                        gt_color,
+                        2,
+                    )
+
+                    # Define label text
+                    label = f"GT: {cls_name}"
+
+                    # Calculate text size for background rectangle
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                    )
+
+                    # Draw background rectangle for text
+                    cv2.rectangle(
+                        img_left_gt,
+                        (int(bbox[0]), int(bbox[1]) - text_height - baseline),
+                        (int(bbox[0]) + text_width, int(bbox[1])),
+                        gt_color,
+                        thickness=cv2.FILLED,
+                    )
+
+                    # Choose text color based on background brightness for readability
+                    text_color = (0, 0, 0) if is_light_color(gt_color) else (255, 255, 255)
+
+                    # Put text label
+                    cv2.putText(
+                        img_left_gt,
+                        label,
+                        (int(bbox[0]), int(bbox[1]) - baseline),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        text_color,
+                        1,
+                        cv2.LINE_AA,
+                    )
+            else:
+                # If no ground truth, create an empty image or duplicate img_left
+                img_left_gt = img_left.copy()
+
             # Annotate frame with tracks using Visualizer
             annotated_frame = visualizer.display(
                 img_left=img_left,
-                img_right=img_right,
+                img_right=img_left_gt,  # Pass the annotated img_left as img_right
                 tracks_active=tracked_tracks,
                 tracks_lost=lost_tracks,
                 names=names,
