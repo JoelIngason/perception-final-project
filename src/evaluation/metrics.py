@@ -205,7 +205,7 @@ def compute_precision_recall_per_class(
     # Create a list of tracked objects per class
     tr_per_class: dict[str, list[TrackedObject]] = defaultdict(list)
     for tr_obj in tracked_objects:
-        cls = tr_obj.to_supported_label().lower()
+        cls = tr_obj.label.lower()
         tr_per_class[cls].append(tr_obj)
 
     for cls, tr_objs in tr_per_class.items():

@@ -410,8 +410,8 @@ class BYTETracker:
                 np.array([det.feature for det in detections_second]),
                 metric="cosine",
             )
-            alpha = 0.5  # Weight for IoU
-            beta = 0.5  # Weight for appearance
+            alpha = 0.3  # Weight for IoU
+            beta = 0.7  # Weight for appearance
             dists_second = alpha * dists_second + beta * appearance_dists
 
         # Ensure dists_second is not empty before assignment

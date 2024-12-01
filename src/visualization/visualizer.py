@@ -81,6 +81,7 @@ class Visualizer:
         save=False,
         filename=None,
         color_mode="class",
+        centroids=list[list[float]],
     ) -> np.ndarray:
         """
         Display the left and right frames with tracked objects and the corresponding depth map.
@@ -112,8 +113,11 @@ class Visualizer:
         }, f"Expected color_mode='instance' or 'class', not {color_mode}."
 
         # Combine confirmed and lost tracks
-        all_tracks = tracks_active + tracks_lost
-
+        all_tracks = []
+        if len(tracks_active) > 0:
+            all_tracks.extend(tracks_active)
+        if len(tracks_lost) > 0:
+            all_tracks.extend(tracks_lost)
         self.logger.debug(f"All tracks: {len(all_tracks)}")
 
         # Generate a color map for track IDs based on class
@@ -213,11 +217,15 @@ class Visualizer:
         # Create a depth heatmap
         depth_heatmap = self._create_depth_heatmap(depth_map)
 
+        # draw centroids on depth map
+        for centroid in centroids:
+            cv2.circle(depth_heatmap, (int(centroid[0]), int(centroid[1])), 5, (0, 255, 0), -1)
+
         # Resize depth map to match image widths
-        depth_heatmap_resized = self._resize_depth_map(depth_heatmap, img_left.shape[1])
+        # depth_heatmap_resized = self._resize_depth_map(depth_heatmap, img_left.shape[1])
 
         # Prepare list of images to stack vertically
-        images_to_stack = [annotated_img, img_right, depth_heatmap_resized]
+        images_to_stack = [annotated_img, img_right, depth_heatmap]
 
         # Stack images vertically
         combined_visualization = self._stack_images_vertically(images_to_stack)
