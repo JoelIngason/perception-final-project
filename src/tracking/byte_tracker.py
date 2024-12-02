@@ -51,9 +51,18 @@ class BYTETracker:
 
         # Define maximum average velocity thresholds (pixels per frame)
         self.max_avg_velocity = {
-            "x": 50,
-            "y": 50,
+            "x": self.args.max_avg_velocity_x,
+            "y": self.args.max_avg_velocity_y,
         }
+
+        self.alpha = self.args.alpha  # Weight for IoU
+        self.beta = self.args.beta  # Weight for appearance
+        self.alpha_second = self.args.alpha_second  # Weight for IoU in second association
+        self.beta_second = self.args.beta_second  # Weight for appearance in second association
+
+        self.match_second_thresh = self.args.match_second_thresh
+        self.match_final_thresh = self.args.match_final_thresh
+        self.remove_stationary = self.args.remove_stationary
 
     @staticmethod
     def load_config(config_path: str) -> argparse.Namespace:
@@ -413,15 +422,15 @@ class BYTETracker:
                 np.array([det.feature for det in detections_second]),
                 metric="cosine",
             )
-            alpha = 0.3  # Weight for IoU
-            beta = 0.7  # Weight for appearance
-            dists_second = alpha * dists_second + beta * appearance_dists
+            # alpha = 0.3  # Weight for IoU
+            # beta = 0.7  # Weight for appearance
+            dists_second = self.alpha_second * dists_second + self.beta_second * appearance_dists
 
         # Ensure dists_second is not empty before assignment
         if dists_second.size > 0:
             matches_second, u_track_second, u_detection_second = linear_assignment(
                 dists_second,
-                thresh=0.5,
+                thresh=self.match_second_thresh,
             )
 
             for itracked, idet in matches_second:
@@ -496,7 +505,7 @@ class BYTETracker:
         if dists_unconfirmed.size > 0:
             matches_unconfirmed, u_unconfirmed, u_detection_final = linear_assignment(
                 dists_unconfirmed,
-                thresh=0.7,
+                thresh=self.match_final_thresh,
             )
 
             for itracked, idet in matches_unconfirmed:
@@ -569,6 +578,12 @@ class BYTETracker:
         """
         for track in self.lost_stracks:
             if self.frame_id - track.end_frame > self.max_time_lost:
+                track.mark_removed()
+                removed_stracks.append(track)
+            elif (
+                self.remove_stationary and abs(track.mean[5]) <= 5 and abs(track.mean[6]) <= 5
+            ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
+                print(f"Removed track {track.track_id}")
                 track.mark_removed()
                 removed_stracks.append(track)
 
@@ -666,12 +681,12 @@ class BYTETracker:
         if track_features.size > 0 and detection_features.size > 0:
             appearance_dists = cdist(track_features, detection_features, metric="cosine")
         else:
-            appearance_dists = np.ones((len(tracks), len(detections)), dtype=np.float32)
+            appearance_dists = np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
         # Combine distances
-        alpha = 0.5  # Weight for IoU
-        beta = 0.5  # Weight for appearance
-        combined_dists = alpha * iou_dists + beta * appearance_dists
+        # alpha = 0.5  # Weight for IoU
+        # beta = 0.5  # Weight for appearance
+        combined_dists = self.alpha * iou_dists + self.beta * appearance_dists
 
         return combined_dists
 
@@ -751,7 +766,7 @@ class BYTETracker:
             List[STrackFeature]: Filtered list of tracks.
 
         """
-        track_ids_b = {t.track_id for t in tlistb}
+        track_ids_b = [t.track_id for t in tlistb]
         return [t for t in tlista if t.track_id not in track_ids_b]
 
     @staticmethod

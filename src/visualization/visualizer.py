@@ -178,22 +178,24 @@ class Visualizer:
             score = float(track.score) if track.score is not None else 0.0
             track_id = track.track_id
 
+            # Define lost
+            lost = track in tracks_lost
             # Define label
             if labels:
                 if depth is not None and depth > 0:
                     label = (
-                        f"ID:{track_id} {cls_name} {score:.2f} D:{depth:.2f}m"
+                        f"ID:{track_id} {cls_name} {score:.2f} D:{depth:.2f}m {"L" if lost else "A" }"
                         if conf
-                        else f"ID:{track_id} {cls_name} D:{depth:.2f}m"
+                        else f"ID:{track_id} {cls_name} D:{depth:.2f}m {"L" if lost else "A" }"
                     )
                 else:
                     label = (
-                        f"ID:{track_id} {cls_name} {score:.2f}"
+                        f"ID:{track_id} {cls_name} {score:.2f} {"L" if lost else "A" }"
                         if conf
-                        else f"ID:{track_id} {cls_name}"
+                        else f"ID:{track_id} {cls_name} {"L" if lost else "A" }"
                     )
             else:
-                label = f"ID:{track_id}" if conf else f"ID:{track_id}"
+                label = f"ID:{track_id}" if conf else f"ID:{track_id} {"L" if lost else "A" }"
 
             # Choose color
             color = colors[cls_id] if cls_id in colors else self.default_color

@@ -31,16 +31,16 @@ models:
 processing:
   use_rectified_data: true
 stereo:
-  P1: 3255
-  P2: 3578
-  block_size: 7
-  disp12_max_diff: 22
-  min_disparity: 23
-  num_disparities: 288
-  pre_filter_cap: 45
-  speckle_range: 51
-  speckle_window_size: 45
-  uniqueness_ratio: 13
+  P1: 1653
+  P2: 4706
+  block_size: 11
+  disp12_max_diff: 9
+  min_disparity: 21
+  num_disparities: 208
+  pre_filter_cap: 10
+  speckle_range: 1
+  speckle_window_size: 31
+  uniqueness_ratio: 17
 tracking:
   dt: 1.0
   max_age: 60

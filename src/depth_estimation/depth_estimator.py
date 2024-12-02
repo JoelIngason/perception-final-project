@@ -85,38 +85,33 @@ class DepthEstimator:
         speckle_window_size = stereo_config.get("speckle_window_size", 100)
         speckle_range = stereo_config.get("speckle_range", 32)
         pre_filter_cap = stereo_config.get("pre_filter_cap", 63)
-        mode = cv2.STEREO_SGBM_MODE_SGBM_3WAY
+        # mode = cv2.STEREO_SGBM_MODE_SGBM_3WAY
 
         # Initialize StereoSGBM matcher
         try:
-            # self.stereo_matcher = cv2.StereoSGBM.create(
-            #    minDisparity=min_disparity,
-            #    numDisparities=num_disparities,
-            #    blockSize=block_size,
-            #    P1=P1,
-            #    P2=P2,
-            #    disp12MaxDiff=disp12_max_diff,
-            #    uniquenessRatio=uniqueness_ratio,
-            #    speckleWindowSize=speckle_window_size,
-            #    speckleRange=speckle_range,
-            #    preFilterCap=pre_filter_cap,
-            #    mode=mode,
-            # )
-            window_size = 3
-            min_disp = 6
-            num_disp = 112 - min_disp
-            # TODO tweak params
             self.stereo_matcher = cv2.StereoSGBM.create(
-                minDisparity=min_disp,
-                numDisparities=num_disp,
-                blockSize=16,
-                P1=8 * 3 * window_size**2,
-                P2=32 * 3 * window_size**2,
-                disp12MaxDiff=1,
-                uniquenessRatio=10,
-                speckleWindowSize=100,
-                speckleRange=32,
+                minDisparity=min_disparity,
+                numDisparities=num_disparities,
+                blockSize=block_size,
+                P1=P1,
+                P2=P2,
+                disp12MaxDiff=disp12_max_diff,
+                uniquenessRatio=uniqueness_ratio,
+                speckleWindowSize=speckle_window_size,
+                speckleRange=speckle_range,
+                preFilterCap=pre_filter_cap,
             )
+            # self.stereo_matcher = cv2.StereoSGBM.create(
+            #    minDisparity=min_disp,
+            #    numDisparities=num_disp,
+            #    blockSize=16,
+            #    P1=8 * 3 * window_size**2,
+            #    P2=32 * 3 * window_size**2,
+            #    disp12MaxDiff=1,
+            #    uniquenessRatio=10,
+            #    speckleWindowSize=100,
+            #    speckleRange=32,
+            # )
             self.logger.info("StereoSGBM matcher initialized with parameters.")
         except Exception as e:
             self.logger.exception(f"Failed to initialize StereoSGBM matcher: {e}")
@@ -239,8 +234,9 @@ class DepthEstimator:
             # Compute initial depth
             with np.errstate(divide="ignore", invalid="ignore"):
                 depth_map = (self.focal_length * self.baseline) / (disparity_map + 1e-6)
-                depth_map[disparity_map <= 0.0] = np.nan  # Mask invalid disparities
-                depth_map[depth_map > 80.0] = np.nan  # Cap depth values at 80m
+                depth_map[disparity_map <= 0] = np.nan  # Mask invalid disparities
+                depth_map[depth_map < 1.0] = np.nan  # Min depth is 1m
+                depth_map[depth_map > 60.0] = np.nan  # Cap depth values at 60m
 
             self.logger.debug("Initial depth map computed successfully.")
 
@@ -252,7 +248,7 @@ class DepthEstimator:
             # combined_depth = self.combine_depth_maps(depth_map, pred_depth_metric)
 
             # Final refinement
-            refined_depth = self.refine_depth_map(depth_map)
+            refined_depth = self._refine_depth_map(depth_map)
 
             return refined_depth
 
@@ -303,7 +299,7 @@ class DepthEstimator:
             self.logger.exception(f"Error computing object depth: {e}")
             return (np.nan, [x, y])
 
-    def refine_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
+    def _refine_depth_map(self, depth_map: np.ndarray) -> np.ndarray:
         """
         Refine the depth map using post-processing techniques to enhance quality.
 

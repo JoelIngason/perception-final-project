@@ -4,7 +4,6 @@ import logging.config
 import pickle
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,8 @@ from scipy.optimize import linear_sum_assignment
 sys.path.append("")
 from src.calibration.stereo_calibration import StereoCalibrator
 from src.data_loader.dataset import DataLoader, TrackedObject
-from src.data_loader.dataset import TrackedObject as DatasetTrackedObject
 from src.depth_estimation.depth_estimator import DepthEstimator
+from src.evaluation.evaluator import Evaluator
 from src.models.feature_extractor.feature_extractor import FeatureExtractor
 from src.models.model import load_model
 from src.tracking.byte_tracker import BYTETracker
@@ -41,194 +40,6 @@ def is_light_color(color: tuple[int, int, int]) -> bool:
     return luminance > 186  # Threshold for light colors
 
 
-class Evaluator:
-    """Evaluate the performance of the object tracking system."""
-
-    def __init__(self, distance_threshold: float = 200.0):
-        """Initialize the Evaluator for computing and reporting metrics."""
-        self.logger = logging.getLogger("autonomous_perception.evaluation")
-        if not self.logger.hasHandlers():
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-            self.logger.setLevel(logging.WARNING)
-        self.reset()
-        self.logger.debug("Evaluator initialized and reset.")
-
-        self.distance_threshold = distance_threshold  # MOTA threshold
-
-    def reset(self) -> None:
-        """Reset the evaluation metrics."""
-        self.logger.debug("Resetting evaluation metrics.")
-        self.precisions: list[float] = []
-        self.recalls: list[float] = []
-        self.f1_scores: list[float] = []
-        self.motas: list[float] = []
-        self.motps: list[float] = []
-        self.class_precisions: defaultdict = defaultdict(list)
-        self.class_recalls: defaultdict = defaultdict(list)
-        self.dimension_errors: list[float] = []
-        self.total_objects: int = 0
-        self.total_tracked: int = 0
-        self.total_correct: int = 0
-
-    def evaluate(
-        self,
-        tracked_objects: list[TrackedObject],
-        labels: list[GroundTruthObject],
-    ) -> None:
-        """Compare tracked objects with ground truth labels to compute metrics."""
-        self.logger.debug(
-            (
-                f"Starting evaluation with {len(tracked_objects)} tracked objects and "
-                f"{len(labels)} ground truth objects."
-            ),
-        )
-
-        # Organize ground truth and tracked objects by class
-        gt_by_class = defaultdict(list)
-        for gt in labels:
-            gt_by_class[gt.obj_type].append(gt)
-
-        trk_by_class = defaultdict(list)
-        for trk in tracked_objects:
-            trk_by_class[trk.label].append(trk)
-
-        # Iterate over each class to compute metrics
-        for cls in gt_by_class.keys():
-            gts = gt_by_class[cls]
-            trs = trk_by_class.get(cls, [])
-
-            self.logger.debug(f"Evaluating class '{cls}': {len(gts)} GTs, {len(trs)} TRKs.")
-
-            # Update total counts
-            self.total_objects += len(gts)
-            self.total_tracked += len(trs)
-
-            # Compute cost matrix based on Euclidean distance between 3D positions
-            if len(gts) > 0 and len(trs) > 0:
-                cost_matrix = np.zeros((len(gts), len(trs)), dtype=np.float32)
-                for i, gt in enumerate(gts):
-                    for j, trk in enumerate(trs):
-                        cost = np.linalg.norm(np.array(gt.bbox) - np.array(trk.bbox))
-                        cost_matrix[i, j] = cost
-
-                # Perform Hungarian matching
-                row_ind, col_ind = linear_sum_assignment(cost_matrix)
-
-                # Determine matches based on distance threshold
-                matches = []
-                for r, c in zip(row_ind, col_ind, strict=False):
-                    if cost_matrix[r, c] <= self.distance_threshold:
-                        matches.append((r, c))
-
-                self.logger.debug(f"Class '{cls}': {len(matches)} matches found.")
-
-                # Update correct matches
-                self.total_correct += len(matches)
-
-                # Compute precision and recall for this class
-                precision = len(matches) / len(trs) if len(trs) > 0 else 0.0
-                recall = len(matches) / len(gts) if len(gts) > 0 else 0.0
-                f1 = (
-                    2 * precision * recall / (precision + recall)
-                    if (precision + recall) > 0
-                    else 0.0
-                )
-
-                self.precisions.append(precision)
-                self.recalls.append(recall)
-                self.f1_scores.append(f1)
-
-                self.class_precisions[cls].append(precision)
-                self.class_recalls[cls].append(recall)
-
-                self.logger.debug(
-                    f"Class '{cls}' - Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}",
-                )
-            else:
-                # No tracked objects or no ground truth objects for this class
-                precision = 0.0
-                recall = 0.0
-                f1 = 0.0
-
-                self.precisions.append(precision)
-                self.recalls.append(recall)
-                self.f1_scores.append(f1)
-
-                self.logger.debug(
-                    f"Class '{cls}' - No matches. Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}",
-                )
-
-            # Compute dimension estimation error for matched objects
-            # use the bbox for
-            for r, c in matches:
-                gt = gts[r] if r < len(gts) else None
-                trk = trs[c] if c < len(trs) else None
-                if gt is None or trk is None:
-                    continue
-                gt_dims = gt.bbox
-                trk_dims = trk.bbox
-                error = np.abs(np.array(gt_dims) - np.array(trk_dims))
-                mean_error = np.mean(error)
-                self.dimension_errors.append(mean_error)
-                self.logger.debug(
-                    f"Dimension error for class '{cls}', GT ID {gt.track_id}, TRK ID {trk.track_id}: {mean_error:.4f} pixels",
-                )
-
-        # Compute MOTA for this frame
-        false_positives = self.total_tracked - self.total_correct
-        false_negatives = self.total_objects - self.total_correct
-        mota = (
-            1 - (false_negatives + false_positives) / self.total_objects
-            if self.total_objects > 0
-            else 0.0
-        )
-        self.motas.append(mota)
-        self.logger.debug(f"Computed MOTA for this frame: {mota:.4f}")
-
-    def report(self) -> None:
-        """Aggregate and report overall evaluation metrics."""
-        self.logger.debug("Generating evaluation report.")
-        if not self.precisions:
-            self.logger.warning("No evaluation data to report.")
-            return
-
-        # Compute average metrics
-        avg_precision = sum(self.precisions) / len(self.precisions)
-        avg_recall = sum(self.recalls) / len(self.recalls)
-        avg_f1 = sum(self.f1_scores) / len(self.f1_scores)
-        avg_mota = sum(self.motas) / len(self.motas)
-        avg_dim_error = (
-            sum(self.dimension_errors) / len(self.dimension_errors)
-            if self.dimension_errors
-            else 0.0
-        )
-
-        self.logger.info(f"Average Precision: {avg_precision:.4f}")
-        self.logger.info(f"Average Recall: {avg_recall:.4f}")
-        self.logger.info(f"Average F1-Score: {avg_f1:.4f}")
-        self.logger.info(f"Average MOTA: {avg_mota:.4f}")
-        self.logger.info(f"Average Dimension Error: {avg_dim_error:.4f} meters")
-
-        # Report per-class metrics
-        for cls in self.class_precisions:
-            avg_cls_precision = sum(self.class_precisions[cls]) / len(self.class_precisions[cls])
-            avg_cls_recall = sum(self.class_recalls[cls]) / len(self.class_recalls[cls])
-            self.logger.info(
-                f"Class '{cls}' - Average Precision: {avg_cls_precision:.4f}, Average Recall: {avg_cls_recall:.4f}",
-            )
-
-    def get_average_mota(self) -> float:
-        """Retrieve the average MOTA over all evaluated frames."""
-        if not self.motas:
-            self.logger.warning("No MOTA scores available.")
-            return float("-inf")  # Assign a very low value if no data
-        avg_mota = sum(self.motas) / len(self.motas)
-        return avg_mota
-
-
 def setup_logger(name: str, config_file: str | None = None) -> logging.Logger:
     """Set up logging based on the provided configuration."""
     if config_file and Path(config_file).is_file():
@@ -243,7 +54,7 @@ def setup_logger(name: str, config_file: str | None = None) -> logging.Logger:
 
 @torch.no_grad()
 def run_tracking_pipeline(
-    detections: dict[str, dict[int, list[DatasetTrackedObject]]],
+    detections: dict[str, dict[int, list[TrackedObject]]],
     config_path: str,
     config_pedestrians: argparse.Namespace,
     config_cars: argparse.Namespace,
@@ -386,7 +197,6 @@ def run_tracking_pipeline(
                     track_id=int(track.track_id),
                     label=names[int(cls)],
                     bbox=[x1, y1, x2, y2],
-                    depth=z,
                 )
                 tracked_objects.append(tracked_obj)
 
@@ -401,7 +211,7 @@ class BYTETrackerHyperparameterTuner:
         self,
         calib_params: dict[str, Any],
         config_path: str,
-        detections: dict[str, dict[int, list[DatasetTrackedObject]]],
+        detections: dict[str, dict[int, list[TrackedObject]]],
         ground_truth_labels: dict[int, list[GroundTruthObject]],
         names: list[str],
         feature_extractor: FeatureExtractor,
@@ -415,7 +225,7 @@ class BYTETrackerHyperparameterTuner:
         Args:
             calib_params (Dict[str, Any]): Calibration parameters.
             config_path (str): Path to the configuration file.
-            detections (Dict[str, Dict[int, List[DatasetTrackedObject]]]): Precomputed detections per frame.
+            detections (Dict[str, Dict[int, List[TrackedObject]]]): Precomputed detections per frame.
             ground_truth_labels (Dict[int, list[GroundTruthObject]]): Ground truth labels per frame.
             names (list[str]): list of class names from YOLO model.
             feature_extractor (FeatureExtractor): Feature extractor instance.
@@ -448,29 +258,53 @@ class BYTETrackerHyperparameterTuner:
         # try:
         # Suggest hyperparameters for each class with unique names
         config_pedestrians = {
-            "track_buffer": trial.suggest_int("ped_track_buffer", 1, 90),
-            "match_thresh": trial.suggest_float("ped_match_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("ped_alpha", 0.01, 2.0),
+            "beta": trial.suggest_float("ped_beta", 0.01, 2.0),
+            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 2.0),
+            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 2.0),
+            "max_avg_velocity_x": trial.suggest_float("ped_max_avg_velocity_x", 0.1, 400.0),
+            "max_avg_velocity_y": trial.suggest_float("ped_max_avg_velocity_y", 0.1, 400.0),
+            "track_buffer": trial.suggest_int("ped_track_buffer", 1, 15),
+            "match_thresh": trial.suggest_float("ped_match_thresh", 0.4, 0.99),
+            "match_second_thresh": trial.suggest_float("ped_match_second_thresh", 0.4, 0.99),
+            "match_final_thresh": trial.suggest_float("ped_match_final_thresh", 0.4, 0.99),
             "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.2, 0.9),
+            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
         }
 
         config_cars = {
-            "track_buffer": trial.suggest_int("car_track_buffer", 1, 90),
-            "match_thresh": trial.suggest_float("car_match_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("car_alpha", 0.01, 2.0),
+            "beta": trial.suggest_float("car_beta", 0.01, 2.0),
+            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 2.0),
+            "beta_second": trial.suggest_float("car_beta_second", 0.01, 2.0),
+            "max_avg_velocity_x": trial.suggest_float("car_max_avg_velocity_x", 0.1, 400.0),
+            "max_avg_velocity_y": trial.suggest_float("car_max_avg_velocity_y", 0.1, 400.0),
+            "track_buffer": trial.suggest_int("car_track_buffer", 1, 15),
+            "match_thresh": trial.suggest_float("car_match_thresh", 0.4, 0.99),
+            "match_second_thresh": trial.suggest_float("car_match_second_thresh", 0.4, 0.99),
+            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.4, 0.99),
             "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.2, 0.9),
+            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
         }
 
         config_cyclists = {
-            "track_buffer": trial.suggest_int("cyclist_track_buffer", 1, 90),
-            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("cyclist_alpha", 0.01, 2.0),
+            "beta": trial.suggest_float("cyclist_beta", 0.01, 2.0),
+            "alpha_second": trial.suggest_float("cyclist_alpha_second", 0.01, 2.0),
+            "beta_second": trial.suggest_float("cyclist_beta_second", 0.01, 2.0),
+            "max_avg_velocity_x": trial.suggest_float("cyclist_max_avg_velocity_x", 0.1, 400.0),
+            "max_avg_velocity_y": trial.suggest_float("cyclist_max_avg_velocity_y", 0.1, 400.0),
+            "track_buffer": trial.suggest_int("cyclist_track_buffer", 1, 15),
+            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.4, 0.99),
+            "match_second_thresh": trial.suggest_float("cyclist_match_second_thresh", 0.4, 0.99),
+            "match_final_thresh": trial.suggest_float("cyclist_match_final_thresh", 0.4, 0.99),
             "track_high_thresh": trial.suggest_float("cyclist_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("cyclist_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("cyclist_new_track_thresh", 0.2, 0.9),
+            "new_track_thresh": trial.suggest_float("cyclist_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("cyclist_fuse_score", [True, False]),
         }
 
@@ -494,11 +328,21 @@ class BYTETrackerHyperparameterTuner:
 
         # Get the average MOTA
         avg_mota = evaluator.get_average_mota()
+        avg_precision = evaluator.get_average_precision()
+        avg_extra_track_rate = evaluator.get_average_extra_tracks_rate()
+        avg_dimension_error = evaluator.get_average_dimension_error()
 
-        self.logger.info(f"Trial {trial.number}: Average MOTA = {avg_mota:.4f}")
+        self.logger.info(
+            f"Trial {trial.number}: Average MOTA = {avg_mota:.4f} and Precision = {avg_precision:.4f}",
+        )
 
-        # Since Optuna minimizes by default, return negative MOTA to maximize it
-        return -avg_mota
+        # Since Optuna minimizes by default, return negative MOTA and Precision,
+        # with a penalty for extra tracks and dimension error
+        return (
+            -1.0 * (avg_mota + avg_precision)
+            + 2.0 * avg_extra_track_rate
+            + 0.1 * avg_dimension_error
+        )
 
     # except Exception as e:
     #    self.logger.error(f"Trial {trial.number} failed with exception: {e}")
@@ -521,7 +365,7 @@ class BYTETrackerHyperparameterTuner:
             self.objective,
             n_trials=self.n_trials,
             timeout=self.timeout,
-            n_jobs=1,
+            n_jobs=8,
             show_progress_bar=True,
         )
         self.logger.info(
@@ -539,7 +383,7 @@ def precompute_detections_and_depth(
     data_loader: DataLoader,
     use_rectified_data: bool,
     calib_params: dict[str, Any],
-) -> dict[str, dict[int, list[DatasetTrackedObject]]]:
+) -> dict[str, dict[int, list[TrackedObject]]]:
     """
     Precompute detections for all frames.
 
@@ -551,7 +395,7 @@ def precompute_detections_and_depth(
         calib_params (Dict[str, Any]): Calibration parameters.
 
     Returns:
-        Dict[str, Dict[int, List[DatasetTrackedObject]]]: Precomputed detections per frame.
+        Dict[str, Dict[int, List[TrackedObject]]]: Precomputed detections per frame.
 
     """
     detections = {}
@@ -598,7 +442,7 @@ def precompute_detections_and_depth(
                 bbox = result.xyxy[0].tolist()  # [x_center, y_center, width, height]
                 # Assuming depth_estimator can compute depth and centroid from bbox and depth_map
                 depth, centroid = depth_estimator.compute_object_depth(bbox, depth_map)
-                tracked_obj = DatasetTrackedObject(
+                tracked_obj = TrackedObject(
                     frame_idx=frame_idx,
                     bbox=bbox,
                     depth=depth,
@@ -646,7 +490,7 @@ def main():
     parser.add_argument(
         "--n_trials",
         type=int,
-        default=50,
+        default=3000,
         help="Number of hyperparameter optimization trials",
     )
     parser.add_argument(

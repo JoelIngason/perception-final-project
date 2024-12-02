@@ -513,7 +513,7 @@ class HyperparameterTuner:
         """
         # Suggest hyperparameters
         stereo_config = {}
-        stereo_config["min_disparity"] = trial.suggest_int("min_disparity", 0, 70)
+        stereo_config["min_disparity"] = trial.suggest_int("min_disparity", 0, 30)
         stereo_config["num_disparities"] = trial.suggest_int("num_disparities", 16, 512, step=16)
         stereo_config["block_size"] = trial.suggest_int("block_size", 3, 21, step=2)  # must be odd
 
@@ -521,16 +521,16 @@ class HyperparameterTuner:
         window_size = stereo_config["block_size"]
         stereo_config["P1"] = trial.suggest_int(
             "P1",
-            4 * 3 * window_size**2,
+            1 * 3 * window_size**2,
             42 * 3 * window_size**2,
         )
         stereo_config["P2"] = trial.suggest_int(
             "P2",
-            8 * 3 * window_size**2,
+            2 * 3 * window_size**2,
             192 * 3 * window_size**2,
         )
 
-        stereo_config["disp12_max_diff"] = trial.suggest_int("disp12_max_diff", 0, 50)
+        stereo_config["disp12_max_diff"] = trial.suggest_int("disp12_max_diff", 0, 20)
         stereo_config["uniqueness_ratio"] = trial.suggest_int("uniqueness_ratio", 1, 20)
         stereo_config["speckle_window_size"] = trial.suggest_int("speckle_window_size", 5, 200)
         stereo_config["speckle_range"] = trial.suggest_int("speckle_range", 1, 64)
@@ -544,7 +544,7 @@ class HyperparameterTuner:
         depth_estimator = DepthEstimator(
             calib_params=self.calib_params,
             config=config_copy,
-            image_size=self.config.get("image_size", (1280, 720)),
+            image_size=self.config.get("image_size", (1224, 370)),
             baseline_correction_factor=self.config.get("baseline_correction_factor", 1.0),
         )
 
@@ -643,10 +643,11 @@ if __name__ == "__main__":
     depth_estimator = DepthEstimator(calib_params, config)
 
     # Optional: Split data into training and validation sets
-    tuning_labels = {idx: labels[idx] for idx in range(0, len(images_left), 10)}
-    images_left = images_left[:100]
-    images_right = images_right[:100]
+    # tuning_labels = {idx: labels[idx] for idx in range(0, len(images_left), 10)}
+    ##images_left = images_left[:100]
+    # images_right = images_right[:100]
 
+    tuning_labels = labels
     # Initialize HyperparameterTuner
     tuner = HyperparameterTuner(
         calib_params=calib_params,
