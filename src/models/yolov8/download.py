@@ -8,7 +8,7 @@ from roboflow import Roboflow
 # =======================
 # Configuration Parameters
 # =======================
-ROBLOFFLOW_API_KEY = "2syVdXYlMuYRZCFyFAfp"
+ROBLOFFLOW_API_KEY = "ENTER_YOUR_RO_API_KEY"
 
 # Define the datasets with their respective workspace names, project names, and version numbers
 DATASETS = [
