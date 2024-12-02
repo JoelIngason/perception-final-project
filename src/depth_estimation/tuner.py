@@ -383,6 +383,10 @@ class DepthEstimator:
             frame_errors = []
             current_labels = labels[idx] if idx in labels else []
             for gt_obj in current_labels:
+                # Check if object is obscured
+                if gt_obj.occluded != 0:
+                    self.logger.debug("Skipping occluded object.")
+                    continue
                 # Get ROI
                 x1, y1, x2, y2 = gt_obj.bbox
                 bbox = np.array([int(x1), int(y1), int(x2), int(y2)])
@@ -618,7 +622,7 @@ if __name__ == "__main__":
     # Paths
     config_path = "config/config.yaml"
     calibration_file = "data/34759_final_project_rect/calib_cam_to_cam.txt"
-    labels_file = "data/34759_final_project_rect/seq_01/labels.txt"
+    labels_file = "data/34759_final_project_rect/seq_02/labels.txt"
 
     # Load configuration
     if not Path(config_path).is_file():
@@ -633,8 +637,9 @@ if __name__ == "__main__":
     # Load images
     data_loader = DataLoader(config)
     images = data_loader.load_sequences_rect(calib_params=calib_params)
-    images_left = [frame.image_left for frame in images["1"]]
-    images_right = [frame.image_right for frame in images["1"]]
+    seq_1, seq_2, seq_3 = images
+    images_left = [frame.image_left for frame in seq_2]
+    images_right = [frame.image_right for frame in seq_2]
 
     # Load labels
     labels = parse_labels(labels_file)
@@ -656,7 +661,7 @@ if __name__ == "__main__":
         images_right=images_right,
         labels=tuning_labels,
         logger=logger,
-        n_trials=1000,  # Adjust the number of trials as needed
+        n_trials=10000,  # Adjust the number of trials as needed
     )
 
     # Run hyperparameter tuning
