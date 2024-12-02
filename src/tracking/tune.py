@@ -130,13 +130,13 @@ def run_tracking_pipeline(
                         mask_pedestrians.append([True, True, True, True, True])
                     else:
                         mask_pedestrians.append([True, True, False, True, True])
-                elif det.cls == 1:
+                elif det.cls == 2:
                     detections_cyclists.append(detection)
                     if has_depth:
                         mask_cyclists.append([True, True, True, True, True])
                     else:
                         mask_cyclists.append([True, True, False, True, True])
-                elif det.cls == 2:
+                elif det.cls == 1:
                     detections_cars.append(detection)
                     if has_depth:
                         mask_cars.append([True, True, True, True, True])
@@ -272,6 +272,7 @@ class BYTETrackerHyperparameterTuner:
             "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7),
             "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True, False]),
         }
 
         config_cars = {
@@ -289,6 +290,7 @@ class BYTETrackerHyperparameterTuner:
             "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.7),
             "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True, False]),
         }
 
         config_cyclists = {
@@ -299,13 +301,17 @@ class BYTETrackerHyperparameterTuner:
             "max_avg_velocity_x": trial.suggest_float("cyclist_max_avg_velocity_x", 0.1, 400.0),
             "max_avg_velocity_y": trial.suggest_float("cyclist_max_avg_velocity_y", 0.1, 400.0),
             "track_buffer": trial.suggest_int("cyclist_track_buffer", 1, 15),
-            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("cyclist_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("cyclist_match_final_thresh", 0.4, 0.99),
+            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.2, 0.99),
+            "match_second_thresh": trial.suggest_float("cyclist_match_second_thresh", 0.2, 0.99),
+            "match_final_thresh": trial.suggest_float("cyclist_match_final_thresh", 0.2, 0.99),
             "track_high_thresh": trial.suggest_float("cyclist_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("cyclist_track_low_thresh", 0.1, 0.7),
             "new_track_thresh": trial.suggest_float("cyclist_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("cyclist_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical(
+                "cyclist_remove_stationary",
+                [True, False],
+            ),
         }
 
         self.logger.info(f"Trial {trial.number}: Suggested hyperparameters.")
@@ -339,9 +345,8 @@ class BYTETrackerHyperparameterTuner:
         # Since Optuna minimizes by default, return negative MOTA and Precision,
         # with a penalty for extra tracks and dimension error
         return (
-            -1.0 * (avg_mota + avg_precision)
-            + 2.0 * avg_extra_track_rate
-            + 0.1 * avg_dimension_error
+            -1.0 * (avg_mota + avg_precision) + 2.0 * avg_extra_track_rate
+            # + 0.1 * avg_dimension_error
         )
 
     # except Exception as e:

@@ -198,14 +198,38 @@ class BYTETracker:
         # Update track lists
         self.update_track_lists(activated_stracks, refind_stracks, lost_stracks, removed_stracks)
 
+        # Fix weird bug where tracks are not properly removed
+        ids_remove = []
+        for track in self.tracked_stracks + self.lost_stracks + self.removed_stracks:
+            if track.state == TrackState.Removed:
+                ids_remove.append(track.track_id)
+
+        self.tracked_stracks = [
+            track for track in self.tracked_stracks if track.track_id not in ids_remove
+        ]
+        self.lost_stracks = [
+            track for track in self.lost_stracks if track.track_id not in ids_remove
+        ]
+        self.removed_stracks = [
+            track for track in self.removed_stracks if track.track_id not in ids_remove
+        ]
+
         return self.get_active_tracks()
 
     def handle_no_detections(self):
         """Handle the scenario where there are no detections in the current frame."""
-        dists = np.zeros((len(self.tracked_stracks), 0), dtype=np.float32)
-        matches, u_track, u_detection = linear_assignment(dists, thresh=self.args.match_thresh)
         # No detections to process
-        # Further handling can be implemented as needed
+        unconfirmed, tracked_stracks = self.separate_stracks()
+        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        self.multi_predict(strack_pool)
+        # Mark all tracks as lost since there is no detection this frame
+        self.lost_stracks = self.joint_stracks(self.tracked_stracks, self.lost_stracks)
+        for idx, track in enumerate(self.lost_stracks):
+            track.state = TrackState.Lost
+            self.lost_stracks[idx] = track
+
+        self.tracked_stracks = []
+        return []
 
     def get_active_tracks(self) -> np.ndarray:
         """
@@ -306,7 +330,11 @@ class BYTETracker:
             Tuple[List[STrackFeature], List[STrackFeature]]: Unconfirmed and confirmed stracks.
 
         """
-        unconfirmed = [track for track in self.tracked_stracks if not track.is_activated]
+        unconfirmed = [
+            track
+            for track in self.tracked_stracks
+            if not track.is_activated and track.state != TrackState.Removed
+        ]
         tracked_stracks = [track for track in self.tracked_stracks if track.is_activated]
         return unconfirmed, tracked_stracks
 
@@ -581,7 +609,7 @@ class BYTETracker:
                 track.mark_removed()
                 removed_stracks.append(track)
             elif (
-                self.remove_stationary and abs(track.mean[5]) <= 5 and abs(track.mean[6]) <= 5
+                self.remove_stationary and abs(track.mean[5]) <= 0.1 and abs(track.mean[6]) <= 0.1
             ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
                 print(f"Removed track {track.track_id}")
                 track.mark_removed()
@@ -607,6 +635,9 @@ class BYTETracker:
 
         """
         # Update track lists
+        self.removed_stracks = self.joint_stracks(self.removed_stracks, removed_stracks)
+        if len(self.removed_stracks) > 1000:
+            self.removed_stracks = self.removed_stracks[-999:]
         self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
         self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
         self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
@@ -617,9 +648,6 @@ class BYTETracker:
             self.tracked_stracks,
             self.lost_stracks,
         )
-        self.removed_stracks.extend(removed_stracks)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-999:]
 
     def init_track(
         self,

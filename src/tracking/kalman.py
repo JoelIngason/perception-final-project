@@ -241,6 +241,7 @@ class KalmanFilterXYZAH:
 
         Returns:
             (tuple[ndarray, ndarray]): Returns the measurement-corrected state distribution.
+
         """
         if measurement_mask is None:
             measurement_mask = np.array([True, True, True, True, True])
@@ -266,7 +267,7 @@ class KalmanFilterXYZAH:
         S = (
             covariance_proj
             + np.diag(
-                [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices]
+                [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices],
             )
             ** 2
         )
@@ -340,5 +341,4 @@ class KalmanFilterXYZAH:
         #    # If covariance is not positive definite, fallback to pseudo-inverse
         #    inv_cov = np.linalg.pinv(covariance_proj)
         #    return np.einsum("ij,ij->i", d, np.dot(d, inv_cov))
-        else:
-            raise ValueError("Invalid distance metric")
+        raise ValueError("Invalid distance metric")

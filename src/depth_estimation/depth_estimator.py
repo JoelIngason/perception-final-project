@@ -233,9 +233,9 @@ class DepthEstimator:
         try:
             # Compute initial depth
             with np.errstate(divide="ignore", invalid="ignore"):
-                depth_map = (self.focal_length * self.baseline) / (disparity_map + 1e-6)
+                depth_map = (self.focal_length * self.baseline) / (disparity_map + 1e-8)
                 depth_map[disparity_map <= 0] = np.nan  # Mask invalid disparities
-                depth_map[depth_map < 1.0] = np.nan  # Min depth is 1m
+                depth_map[depth_map < 3.0] = np.nan  # Min depth is 3m
                 depth_map[depth_map > 60.0] = np.nan  # Cap depth values at 60m
 
             self.logger.debug("Initial depth map computed successfully.")
