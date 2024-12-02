@@ -1,0 +1,15 @@
+alpha: 0.4
+alpha_second: 0.4
+beta: 0.8
+beta_second: 0.8
+fuse_score: True
+match_final_thresh: 0.83
+match_second_thresh: 0.50
+match_thresh: 0.8
+max_avg_velocity_x: 50
+max_avg_velocity_y: 50
+new_track_thresh: 0.2
+track_buffer: 4
+track_high_thresh: 0.6
+track_low_thresh: 0.2
+remove_stationary: False

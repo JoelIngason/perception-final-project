@@ -1,0 +1,47 @@
+calibration:
+  calibration_file_rect: data/34759_final_project_rect/calib_cam_to_cam.txt
+  chessboard_size:
+  - 9
+  - 6
+  square_size: 0.01
+data:
+  calibration_file: data/34759_final_project_raw/calib_cam_to_cam.txt
+  label_files:
+  - ''
+  - data/34759_final_project_rect/seq_01/labels.txt
+  - data/34759_final_project_rect/seq_02/labels.txt
+  - ''
+  raw_sequences_path:
+  - data/34759_final_project_raw/seq_01/
+  - data/34759_final_project_raw/seq_02/
+  - data/34759_final_project_raw/seq_03/
+  rect_sequences_path:
+  - data/34759_final_project_rect/seq_01/
+  - data/34759_final_project_rect/seq_02/
+  - data/34759_final_project_rect/seq_03/
+  rectified_images_path: data/34759_final_project_rect/rectified_images/
+logging:
+  config_file: config/logging.yaml
+models:
+  classification:
+    path: src/models/yolov8/best.pt
+  confidence_threshold: 0.4
+  device: cuda:0
+  nms_threshold: 0.3
+processing:
+  use_rectified_data: true
+stereo:
+  P1: 1653
+  P2: 4706
+  block_size: 11
+  disp12_max_diff: 9
+  min_disparity: 21
+  num_disparities: 208
+  pre_filter_cap: 10
+  speckle_range: 1
+  speckle_window_size: 31
+  uniqueness_ratio: 17
+tracking:
+  dt: 1.0
+  max_age: 60
+  min_hits: 3
