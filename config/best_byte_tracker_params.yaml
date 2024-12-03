@@ -40,6 +40,6 @@ ped_max_avg_velocity_x: 340.1
 ped_max_avg_velocity_y: 80.1
 ped_new_track_thresh: 0.606294003979117
 ped_remove_stationary: true
-ped_track_buffer: 5
+ped_track_buffer: 500
 ped_track_high_thresh: 0.4754608147101548
 ped_track_low_thresh: 0.4485640070044559

@@ -123,6 +123,8 @@ def run(config_path: str) -> None:
 
     # Iterate over each sequence
     for seq_id, frames in data.items():
+        if seq_id == "1":
+            continue
         logger.info(f"Processing sequence {seq_id} with {len(frames)} frames.")
         evaluator.reset()
         tracker_pedastrians.reset()
@@ -193,7 +195,7 @@ def run(config_path: str) -> None:
             detections = np.hstack((detections, scores, cls_labels))
 
             # Update trackers with detections tracker with detections and measurement masks
-            # active_tracks = tracker.update(detections, measurement_masks, img_left)
+            # active_tracks = tracker_pedastrians.update(detections, measurement_masks, img_left)
             detections_pedastrians = detections[cls_labels.flatten() == 0]
             detections_cars = detections[cls_labels.flatten() == 1]
             detections_cyclists = detections[cls_labels.flatten() == 2]
@@ -201,13 +203,11 @@ def run(config_path: str) -> None:
             measurement_masks_pedastrians = measurement_masks[cls_labels.flatten() == 0]
             measurement_masks_cars = measurement_masks[cls_labels.flatten() == 1]
             measurement_masks_cyclists = measurement_masks[cls_labels.flatten() == 2]
-
             active_tracks_pedastrians = tracker_pedastrians.update(
                 detections_pedastrians,
                 measurement_masks_pedastrians,
                 img_left,
             )
-
             active_tracks_cars = tracker_cars.update(
                 detections_cars,
                 measurement_masks_cars,
@@ -244,12 +244,11 @@ def run(config_path: str) -> None:
                 + tracker_cars.lost_stracks
                 + tracker_cyclists.lost_stracks
             )
+            # lost_tracks = []
 
-            all_tracks = tracked_tracks + lost_tracks
-
-            for track in all_tracks:
-                if track.state == 3:
-                    print("damn, this is not supposed to be here")
+            all_tracks = [track for track in tracked_tracks if track.state != 3] + [
+                track for track in lost_tracks if track.state != 3
+            ]
 
             # Convert active tracks to TrackedObject instances for evaluation
             tracked_objects = []
