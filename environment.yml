@@ -1,27 +1,33 @@
 name: perception
 channels:
+  - nvidia
+  - pytorch
   - conda-forge
-  - defaults
-  - zimmf # For cudatoolkit on m1/m2/mx mac
+#  - defaults
+#  - zimmf  # For cudatoolkit on M1/M2/MX Mac
 dependencies:
-  - python=3.11
+  - python
   - pip
-  - numpy
+  - numpy<2.0.0
   - pandas
   - scikit-learn
+  - scikit-image
   - pytorch
   - torchvision
   - cudatoolkit
+  - cudnn
+  - cudatoolkit-dev
   - opencv
   - matplotlib
-  - seaborn
   - pyyaml
   - ruff
   - python-dotenv
   - ultralytics
+  - tensorboard
+  - timm
+  - tabulate
+
   - pip:
-    - tensorboard
-    - torch-tb-profiler
-    - tensorboard-plugin-profile
-    - sort-track
-    - deep-sort-realtime
+    - roboflow
+    - boxmot
+    - screeninfo

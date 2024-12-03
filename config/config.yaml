@@ -1,32 +1,58 @@
-# config/config.yaml
+# Paths to raw and rectified sequences
 data:
-  raw_sequences_path: ["data/34759_final_project_raw/seq_01/", "data/34759_final_project_raw/seq_02/", "data/34759_final_project_raw/seq_03/"]
-  rect_sequences_path: ["data/34759_final_project_rect/seq_01/", "data/34759_final_project_rect/seq_02/", "data/34759_final_project_rect/seq_03/"]
+  raw_sequences_path:
+    - "data/34759_final_project_raw/seq_01/"
+    - "data/34759_final_project_raw/seq_02/"
+    - "data/34759_final_project_raw/seq_03/"
+  rect_sequences_path:
+    - "data/34759_final_project_rect/seq_01/"
+    - "data/34759_final_project_rect/seq_02/"
+    - "data/34759_final_project_rect/seq_03/"
   calibration_file: "data/34759_final_project_raw/calib_cam_to_cam.txt"
   rectified_images_path: "data/34759_final_project_rect/rectified_images/"
+  label_files:
+    - ""  # Sequence 0 (if sequences start from 1)
+    - "data/34759_final_project_rect/seq_01/labels.txt"  # Sequence 1
+    - "data/34759_final_project_rect/seq_02/labels.txt"  # Sequence 2
+    - ""  # Sequence 3 (no labels)
 
+# Calibration parameters
 calibration:
   chessboard_size: [9, 6]
-  square_size: 0.025  # in meters
+  square_size: 0.01  # in meters
   calibration_file_rect: "data/34759_final_project_rect/calib_cam_to_cam.txt"
 
-detection:
-  model: "yolov8"
-  confidence_threshold: 0.5
-  nms_threshold: 0.4
+# Detection parameters
+models:
+  classification:
+    path: "src/models/yolov8/best.pt"  # Ensure this model exists or use a valid path
+  device: "cuda:0"  # or "cuda:0" if using GPU
+  confidence_threshold: 0.4
+  nms_threshold: 0.3
 
+# Tracking parameters
 tracking:
-  algorithm: "kalman"
-  max_age: 30
+  max_age: 60
   min_hits: 3
+  dt: 1.0
 
-classification:
-  model_path: "src/models/yolov8/yolov8.pt" # Remember to change this path based on your model
-  input_size: 224
+# Stereo matching parameters
+stereo:
+  P1: 2254
+  P2: 6582
+  block_size: 7
+  disp12_max_diff: 13
+  min_disparity: 23
+  num_disparities: 240
+  pre_filter_cap: 33
+  speckle_range: 4
+  speckle_window_size: 133
+  uniqueness_ratio: 11
 
+# Logging configuration
 logging:
   config_file: "config/logging.yaml"
-  
+
+# Processing options
 processing:
   use_rectified_data: true  # Set to false to process raw data
-
