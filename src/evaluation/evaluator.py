@@ -1,6 +1,8 @@
 import logging
+import os
 from collections import defaultdict
 
+import matplotlib.pyplot as plt  # Import matplotlib for plotting
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -69,7 +71,7 @@ class Evaluator:
         frame_correct = 0  # Number of correct matches in this frame
 
         # Iterate over each class to compute metrics
-        for cls in gt_by_class.keys():
+        for cls in gt_by_class:
             gts = gt_by_class[cls]
             trs = trk_by_class.get(cls, [])
 
@@ -222,6 +224,153 @@ class Evaluator:
                 f"Class '{cls}' - Average Precision: {avg_cls_precision:.4f}, "
                 f"Average Recall: {avg_cls_recall:.4f}",
             )
+
+    def create_plots(self, seq_id: str):
+        """Create plots for the evaluation metric and save them."""
+        save_dir = "plots"
+        os.makedirs(save_dir, exist_ok=True)  # Ensure the save directory exists
+        self.logger.debug(f"Creating plots for evaluation metrics and saving to '{save_dir}'.")
+
+        # Create a figure with multiple subplots
+        fig, axs = plt.subplots(3, 2, figsize=(15, 15))
+        fig.suptitle(f"Evaluation Metrics for Sequence {seq_id}", fontsize=16)
+
+        # Plot Precision over Frames
+        axs[0, 0].plot(self.precisions, label="Precision", color="blue")
+        axs[0, 0].set_title("Precision over Frames")
+        axs[0, 0].set_xlabel("Frame")
+        axs[0, 0].set_ylabel("Precision")
+        axs[0, 0].legend()
+        axs[0, 0].grid(True)
+
+        # Plot Recall over Frames
+        axs[0, 1].plot(self.recalls, label="Recall", color="green")
+        axs[0, 1].set_title("Recall over Frames")
+        axs[0, 1].set_xlabel("Frame")
+        axs[0, 1].set_ylabel("Recall")
+        axs[0, 1].legend()
+        axs[0, 1].grid(True)
+
+        # Plot F1-Score over Frames
+        axs[1, 0].plot(self.f1_scores, label="F1-Score", color="orange")
+        axs[1, 0].set_title("F1-Score over Frames")
+        axs[1, 0].set_xlabel("Frame")
+        axs[1, 0].set_ylabel("F1-Score")
+        axs[1, 0].legend()
+        axs[1, 0].grid(True)
+
+        # Plot MOTA over Frames
+        axs[1, 1].plot(self.motas, label="MOTA", color="red")
+        axs[1, 1].set_title("MOTA over Frames")
+        axs[1, 1].set_xlabel("Frame")
+        axs[1, 1].set_ylabel("MOTA")
+        axs[1, 1].legend()
+        axs[1, 1].grid(True)
+
+        # Plot Extra Tracks over Frames
+        axs[2, 0].plot(self.extra_tracks, label="Extra Tracks", color="purple")
+        axs[2, 0].set_title("Extra Tracks over Frames")
+        axs[2, 0].set_xlabel("Frame")
+        axs[2, 0].set_ylabel("Number of Extra Tracks")
+        axs[2, 0].legend()
+        axs[2, 0].grid(True)
+
+        # Plot Extra Tracks Rate over Frames
+        axs[2, 1].plot(self.extra_tracks_rates, label="Extra Tracks Rate", color="brown")
+        axs[2, 1].set_title("Extra Tracks Rate over Frames")
+        axs[2, 1].set_xlabel("Frame")
+        axs[2, 1].set_ylabel("Extra Tracks Rate")
+        axs[2, 1].legend()
+        axs[2, 1].grid(True)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout to make room for the title
+
+        # Save the combined metrics plot
+        metrics_plot_path = os.path.join(save_dir, f"{seq_id}_metrics.png")
+        plt.savefig(metrics_plot_path)
+        self.logger.debug(f"Saved metrics plot to '{metrics_plot_path}'.")
+        plt.close(fig)  # Close the figure to free memory
+
+        # Create a separate plot for Dimension Errors (Histogram)
+        if self.dimension_errors:
+            plt.figure(figsize=(8, 6))
+            plt.hist(self.dimension_errors, bins=30, color="skyblue", edgecolor="black")
+            plt.title(f"Dimension Errors Histogram for Sequence {seq_id}")
+            plt.xlabel("Mean Dimension Error (pixels)")
+            plt.ylabel("Frequency")
+            plt.grid(True)
+            dim_error_plot_path = os.path.join(save_dir, f"{seq_id}_dimension_errors.png")
+            plt.savefig(dim_error_plot_path)
+            self.logger.debug(f"Saved dimension errors histogram to '{dim_error_plot_path}'.")
+            plt.close()
+
+        # Create a separate plot for Per-Class Precision and Recall
+        if self.class_precisions and self.class_recalls:
+            classes = list(self.class_precisions.keys())
+            avg_cls_precisions = [
+                sum(self.class_precisions[cls]) / len(self.class_precisions[cls]) for cls in classes
+            ]
+            avg_cls_recalls = [
+                sum(self.class_recalls[cls]) / len(self.class_recalls[cls]) for cls in classes
+            ]
+
+            x = np.arange(len(classes))  # label locations
+            width = 0.35  # width of the bars
+
+            fig, ax = plt.subplots(figsize=(10, 7))
+            rects1 = ax.bar(
+                x - width / 2,
+                avg_cls_precisions,
+                width,
+                label="Precision",
+                color="blue",
+            )
+            rects2 = ax.bar(x + width / 2, avg_cls_recalls, width, label="Recall", color="green")
+
+            # Add some text for labels, title and custom x-axis tick labels, etc.
+            ax.set_ylabel("Scores")
+            ax.set_title(f"Per-Class Precision and Recall for Sequence {seq_id}")
+            ax.set_xticks(x)
+            ax.set_xticklabels(classes, rotation=45, ha="right")
+            ax.legend()
+            ax.grid(True, axis="y")
+
+            # Attach a text label above each bar in rects, displaying its height.
+            def autolabel(rects):
+                for rect in rects:
+                    height = rect.get_height()
+                    ax.annotate(
+                        f"{height:.2f}",
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),  # 3 points vertical offset
+                        textcoords="offset points",
+                        ha="center",
+                        va="bottom",
+                    )
+
+            autolabel(rects1)
+            autolabel(rects2)
+
+            fig.tight_layout()
+            per_class_plot_path = os.path.join(save_dir, f"{seq_id}_per_class_precision_recall.png")
+            plt.savefig(per_class_plot_path)
+            self.logger.debug(
+                f"Saved per-class precision and recall plot to '{per_class_plot_path}'.",
+            )
+            plt.close(fig)
+
+        # Optionally, create more plots such as Extra Tracks histogram
+        if self.extra_tracks:
+            plt.figure(figsize=(8, 6))
+            plt.hist(self.extra_tracks, bins=30, color="salmon", edgecolor="black")
+            plt.title(f"Extra Tracks Histogram for Sequence {seq_id}")
+            plt.xlabel("Number of Extra Tracks")
+            plt.ylabel("Frequency")
+            plt.grid(True)
+            extra_tracks_plot_path = os.path.join(save_dir, f"{seq_id}_extra_tracks.png")
+            plt.savefig(extra_tracks_plot_path)
+            self.logger.debug(f"Saved extra tracks histogram to '{extra_tracks_plot_path}'.")
+            plt.close()
 
     def get_average_mota(self) -> float:
         """Retrieve the average MOTA over all evaluated frames."""

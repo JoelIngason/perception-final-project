@@ -26,8 +26,9 @@ dependencies:
   - tensorboard
   - timm
   - tabulate
-
+  - optuna
   - pip:
     - roboflow
     - boxmot
     - screeninfo
+

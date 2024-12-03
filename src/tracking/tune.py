@@ -3,7 +3,6 @@ import logging
 import logging.config
 import pickle
 import sys
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,6 @@ import numpy as np
 import optuna
 import torch
 import yaml
-from scipy.optimize import linear_sum_assignment
 
 # Ensure the project modules are in the path
 sys.path.append("")
@@ -104,6 +102,11 @@ def run_tracking_pipeline(
     logger.info("BYTETracker initialized.")
 
     for seq_id, det in detections.items():
+        if seq_id == "1" or seq_id == "3":
+            continue
+        tracker_pedestrians.reset()
+        tracker_cars.reset()
+        tracker_cyclists.reset()
         for frame_idx, frame_detections in det.items():
             # Prepare detections for each class
             detections_pedestrians = []
@@ -130,13 +133,13 @@ def run_tracking_pipeline(
                         mask_pedestrians.append([True, True, True, True, True])
                     else:
                         mask_pedestrians.append([True, True, False, True, True])
-                elif det.cls == 1:
+                elif det.cls == 2:
                     detections_cyclists.append(detection)
                     if has_depth:
                         mask_cyclists.append([True, True, True, True, True])
                     else:
                         mask_cyclists.append([True, True, False, True, True])
-                elif det.cls == 2:
+                elif det.cls == 1:
                     detections_cars.append(detection)
                     if has_depth:
                         mask_cars.append([True, True, True, True, True])
@@ -258,54 +261,94 @@ class BYTETrackerHyperparameterTuner:
         # try:
         # Suggest hyperparameters for each class with unique names
         config_pedestrians = {
-            "alpha": trial.suggest_float("ped_alpha", 0.01, 2.0),
-            "beta": trial.suggest_float("ped_beta", 0.01, 2.0),
-            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 2.0),
-            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("ped_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("ped_max_avg_velocity_y", 0.1, 400.0),
-            "track_buffer": trial.suggest_int("ped_track_buffer", 1, 15),
-            "match_thresh": trial.suggest_float("ped_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("ped_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("ped_match_final_thresh", 0.4, 0.99),
-            "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.1, 0.99),
-            "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("ped_alpha", 0.01, 1.0, step=0.01),
+            "beta": trial.suggest_float("ped_beta", 0.01, 1.0, step=0.01),
+            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 1.0, step=0.01),
+            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 1.0, step=0.01),
+            "track_buffer": trial.suggest_int("ped_track_buffer", 50, 500),
+            "match_thresh": trial.suggest_float("ped_match_thresh", 0.4, 1, step=0.01),
+            "match_second_thresh": trial.suggest_float(
+                "ped_match_second_thresh",
+                0.1,
+                0.99,
+                step=0.01,
+            ),
+            "match_final_thresh": trial.suggest_float(
+                "ped_match_final_thresh",
+                0.1,
+                0.99,
+                step=0.01,
+            ),
+            "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.1, 1, step=0.01),
+            "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7, step=0.01),
+            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.95, step=0.01),
             "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True]),
         }
 
         config_cars = {
-            "alpha": trial.suggest_float("car_alpha", 0.01, 2.0),
-            "beta": trial.suggest_float("car_beta", 0.01, 2.0),
-            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 2.0),
-            "beta_second": trial.suggest_float("car_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("car_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("car_max_avg_velocity_y", 0.1, 400.0),
-            "track_buffer": trial.suggest_int("car_track_buffer", 1, 15),
-            "match_thresh": trial.suggest_float("car_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("car_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.4, 0.99),
-            "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.1, 0.99),
-            "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("car_alpha", 0.01, 1.0, step=0.01),
+            "beta": trial.suggest_float("car_beta", 0.01, 1.0, step=0.01),
+            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 1.0, step=0.01),
+            "beta_second": trial.suggest_float("car_beta_second", 0.01, 1.0, step=0.01),
+            "track_buffer": trial.suggest_int("car_track_buffer", 50, 200),
+            "match_thresh": trial.suggest_float("car_match_thresh", 0.2, 1, step=0.01),
+            "match_second_thresh": trial.suggest_float(
+                "car_match_second_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
+            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.1, 1, step=0.01),
+            "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.1, 1, step=0.01),
+            "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.75, step=0.01),
+            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 1, step=0.01),
             "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True]),
         }
 
         config_cyclists = {
-            "alpha": trial.suggest_float("cyclist_alpha", 0.01, 2.0),
-            "beta": trial.suggest_float("cyclist_beta", 0.01, 2.0),
-            "alpha_second": trial.suggest_float("cyclist_alpha_second", 0.01, 2.0),
-            "beta_second": trial.suggest_float("cyclist_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("cyclist_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("cyclist_max_avg_velocity_y", 0.1, 400.0),
-            "track_buffer": trial.suggest_int("cyclist_track_buffer", 1, 15),
-            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("cyclist_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("cyclist_match_final_thresh", 0.4, 0.99),
-            "track_high_thresh": trial.suggest_float("cyclist_track_high_thresh", 0.1, 0.99),
-            "track_low_thresh": trial.suggest_float("cyclist_track_low_thresh", 0.1, 0.7),
-            "new_track_thresh": trial.suggest_float("cyclist_new_track_thresh", 0.1, 0.9),
+            "alpha": trial.suggest_float("cyclist_alpha", 0.01, 1.0, step=0.01),
+            "beta": trial.suggest_float("cyclist_beta", 0.01, 1.0, step=0.01),
+            "alpha_second": trial.suggest_float("cyclist_alpha_second", 0.01, 1.0, step=0.01),
+            "beta_second": trial.suggest_float("cyclist_beta_second", 0.01, 1.0, step=0.01),
+            "track_buffer": trial.suggest_int("cyclist_track_buffer", 20, 100),
+            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.2, 1, step=0.01),
+            "match_second_thresh": trial.suggest_float(
+                "cyclist_match_second_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
+            "match_final_thresh": trial.suggest_float(
+                "cyclist_match_final_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
+            "track_high_thresh": trial.suggest_float(
+                "cyclist_track_high_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
+            "track_low_thresh": trial.suggest_float(
+                "cyclist_track_low_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
+            "new_track_thresh": trial.suggest_float(
+                "cyclist_new_track_thresh",
+                0.1,
+                1,
+                step=0.01,
+            ),
             "fuse_score": trial.suggest_categorical("cyclist_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical(
+                "cyclist_remove_stationary",
+                [True],
+            ),
         }
 
         self.logger.info(f"Trial {trial.number}: Suggested hyperparameters.")
@@ -338,11 +381,7 @@ class BYTETrackerHyperparameterTuner:
 
         # Since Optuna minimizes by default, return negative MOTA and Precision,
         # with a penalty for extra tracks and dimension error
-        return (
-            -1.0 * (avg_mota + avg_precision)
-            + 2.0 * avg_extra_track_rate
-            + 0.1 * avg_dimension_error
-        )
+        return -1.0 * (avg_mota + avg_precision)
 
     # except Exception as e:
     #    self.logger.error(f"Trial {trial.number} failed with exception: {e}")
@@ -490,7 +529,7 @@ def main():
     parser.add_argument(
         "--n_trials",
         type=int,
-        default=3000,
+        default=500,
         help="Number of hyperparameter optimization trials",
     )
     parser.add_argument(

@@ -179,7 +179,11 @@ class Visualizer:
             track_id = track.track_id
 
             # Define lost
-            lost = track in tracks_lost
+            lost = False
+            for tr in tracks_lost:
+                if tr.track_id == track_id and tr.cls == track.cls:
+                    lost = True
+                    break
             # Define label
             if labels:
                 if depth is not None and depth > 0:

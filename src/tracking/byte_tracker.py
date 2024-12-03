@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from scipy.spatial.distance import cdist
+from scipy.spatial.distance import cdist, euclidean
 from ultralytics.trackers.basetrack import TrackState
 
 from src.models.feature_extractor.feature_extractor import FeatureExtractor
@@ -48,12 +48,6 @@ class BYTETracker:
         self.kalman_filter = self.get_kalmanfilter()
         self.reset_id()
         self.feature_extractor = feature_extractor  # Instance of FeatureExtractor
-
-        # Define maximum average velocity thresholds (pixels per frame)
-        self.max_avg_velocity = {
-            "x": self.args.max_avg_velocity_x,
-            "y": self.args.max_avg_velocity_y,
-        }
 
         self.alpha = self.args.alpha  # Weight for IoU
         self.beta = self.args.beta  # Weight for appearance
@@ -197,13 +191,38 @@ class BYTETracker:
 
         # Update track lists
         self.update_track_lists(activated_stracks, refind_stracks, lost_stracks, removed_stracks)
+        # Fix weird bug where tracks are not properly removed
+        ids_remove = []
+        for track in self.tracked_stracks + self.lost_stracks + self.removed_stracks:
+            if track.state == TrackState.Removed:
+                ids_remove.append(track.track_id)
+
+        self.tracked_stracks = [
+            track for track in self.tracked_stracks if track.track_id not in ids_remove
+        ]
+        self.lost_stracks = [
+            track for track in self.lost_stracks if track.track_id not in ids_remove
+        ]
+        self.removed_stracks = [
+            track for track in self.removed_stracks if track.track_id not in ids_remove
+        ]
 
         return self.get_active_tracks()
 
     def handle_no_detections(self):
         """Handle the scenario where there are no detections in the current frame."""
         dists = np.zeros((len(self.tracked_stracks), 0), dtype=np.float32)
-        matches, u_track, u_detection = linear_assignment(dists, thresh=self.args.match_thresh)
+        # predict all the tracks
+        self.multi_predict(self.tracked_stracks)
+        self.multi_predict(self.lost_stracks)
+
+        # Mark all the tracks as lost
+        for track in self.tracked_stracks:
+            track.mark_lost()
+
+        if self.remove_stationary:
+            self.lost_stracks = self.mark_lost_tracks(self.lost_stracks)
+
         # No detections to process
         # Further handling can be implemented as needed
 
@@ -343,17 +362,6 @@ class BYTETracker:
             det = detections_high[idet]
             mask = measurement_masks[idet]
 
-            # Enforce velocity constraints before updating
-            avg_velocity = track.compute_average_velocity()
-            if (
-                abs(avg_velocity[0]) > self.max_avg_velocity["x"]
-                or abs(avg_velocity[1]) > self.max_avg_velocity["y"]
-            ):
-                # Velocity too high; do not match
-                u_track = np.append(u_track, itracked)
-                u_detection = np.append(u_detection, idet)
-                continue
-
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id, measurement_mask=mask)
                 activated_stracks.append(track)
@@ -438,17 +446,6 @@ class BYTETracker:
                 det = detections_second[idet]
                 mask = measurement_masks[idet]
 
-                # Enforce velocity constraints before updating
-                avg_velocity = track.compute_average_velocity()
-                if (
-                    abs(avg_velocity[0]) > self.max_avg_velocity["x"]
-                    or abs(avg_velocity[1]) > self.max_avg_velocity["y"]
-                ):
-                    # Velocity too high; do not match
-                    u_track_second = np.append(u_track_second, itracked)
-                    u_detection_second = np.append(u_detection_second, idet)
-                    continue
-
                 if track.state == TrackState.Tracked:
                     track.update(det, self.frame_id, measurement_mask=mask)
                     activated_stracks.append(track)
@@ -513,17 +510,6 @@ class BYTETracker:
                 det = detections_unconfirmed[idet]
                 mask = masks_unconfirmed[idet]
 
-                # Enforce velocity constraints before updating
-                avg_velocity = track.compute_average_velocity()
-                if (
-                    abs(avg_velocity[0]) > self.max_avg_velocity["x"]
-                    or abs(avg_velocity[1]) > self.max_avg_velocity["y"]
-                ):
-                    # Velocity too high; do not match
-                    u_unconfirmed = np.append(u_unconfirmed, itracked)
-                    u_detection_final = np.append(u_detection_final, idet)
-                    continue
-
                 track.update(
                     det,
                     self.frame_id,
@@ -581,7 +567,7 @@ class BYTETracker:
                 track.mark_removed()
                 removed_stracks.append(track)
             elif (
-                self.remove_stationary and abs(track.mean[5]) <= 5 and abs(track.mean[6]) <= 5
+                self.remove_stationary and abs(track.mean[5]) <= 0 and abs(track.mean[6]) <= 0
             ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
                 print(f"Removed track {track.track_id}")
                 track.mark_removed()
@@ -658,18 +644,11 @@ class BYTETracker:
             for xyzwh, s, c, f in zip(dets, scores, cls_labels, feature_iter, strict=False)
         ]
 
-    def get_dists(self, tracks: list[STrackFeature], detections: list[STrackFeature]) -> np.ndarray:
+    def get_dists(self, tracks, detections):
         """
         Calculate the distance between tracks and detections using both IoU and appearance features.
-
-        Args:
-            tracks (List[STrackFeature]): List of tracks.
-            detections (List[STrackFeature]): List of detections.
-
-        Returns:
-            np.ndarray: Combined distance matrix.
-
         """
+        # Compute IoU-based distances
         iou_dists = iou_distance(tracks, detections)
 
         # Compute appearance-based distances (Cosine distance)
@@ -678,15 +657,29 @@ class BYTETracker:
             [det.feature for det in detections if det.feature is not None],
         )
 
-        if track_features.size > 0 and detection_features.size > 0:
+        if len(track_features) > 0 and len(detection_features) > 0:
             appearance_dists = cdist(track_features, detection_features, metric="cosine")
         else:
-            appearance_dists = np.zeros((len(tracks), len(detections)), dtype=np.float32)
+            appearance_dists = np.ones((len(tracks), len(detections)))
 
-        # Combine distances
-        # alpha = 0.5  # Weight for IoU
-        # beta = 0.5  # Weight for appearance
-        combined_dists = self.alpha * iou_dists + self.beta * appearance_dists
+        # Compute spatial distances
+        spatial_dists = np.zeros((len(tracks), len(detections)), dtype=np.float32)
+        for t, track in enumerate(tracks):
+            for d, det in enumerate(detections):
+                #  det[:4] contains [x, y, z, a], use x and y for spatial distance
+                spatial_dists[t, d] = euclidean(track.mean[:2], det.xyxy[:2])
+
+        # Define maximum spatial distance (e.g., 200 pixels)
+        max_spatial_dist = 200.0
+        spatial_constraint = spatial_dists <= max_spatial_dist
+
+        # Combine distances with weights
+        alpha = 0.5
+        beta = 0.5
+        combined_dists = alpha * iou_dists + beta * appearance_dists
+
+        # Apply spatial constraint by setting distances beyond the threshold to a high value
+        combined_dists[~spatial_constraint] = 1e6  # A large value to prevent matching
 
         return combined_dists
 

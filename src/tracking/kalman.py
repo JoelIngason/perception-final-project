@@ -66,8 +66,8 @@ class KalmanFilterXYZAH:
         self._std_weight_velocity = 1.0 / 160
 
         # Increase uncertainty in z-axis
-        self._std_weight_position_z = 8.0 / 20  # Higher uncertainty
-        self._std_weight_velocity_z = 8.0 / 160
+        self._std_weight_position_z = 4.0 / 20  # Higher uncertainty
+        self._std_weight_velocity_z = 4.0 / 160
 
     def initiate(self, measurement: np.ndarray) -> tuple:
         """
@@ -94,12 +94,12 @@ class KalmanFilterXYZAH:
         std = [
             2 * self._std_weight_position * measurement[4],  # x
             2 * self._std_weight_position * measurement[4],  # y
-            4 * self._std_weight_position_z * measurement[3],  # z
+            4 * self._std_weight_position * measurement[4],  # z
             1e-2,  # a
             2 * self._std_weight_position * measurement[4],  # h
             10 * self._std_weight_velocity * measurement[4],  # vx
             10 * self._std_weight_velocity * measurement[4],  # vy
-            20 * self._std_weight_velocity_z * measurement[3],  # vz
+            20 * self._std_weight_velocity * measurement[4],  # vz
             1e-5,  # va
             10 * self._std_weight_velocity * measurement[4],  # vh
         ]
@@ -130,14 +130,14 @@ class KalmanFilterXYZAH:
         std_pos = [
             self._std_weight_position * mean[4],  # x
             self._std_weight_position * mean[4],  # y
-            self._std_weight_position_z * mean[3],  # z
+            self._std_weight_position * mean[4],  # z
             1e-2,  # a
             self._std_weight_position * mean[4],  # h
         ]
         std_vel = [
             self._std_weight_velocity * mean[4],  # vx
             self._std_weight_velocity * mean[4],  # vy
-            self._std_weight_velocity_z * mean[3],  # vz
+            self._std_weight_velocity * mean[4],  # vz
             1e-5,  # va
             self._std_weight_velocity * mean[4],  # vh
         ]
@@ -171,7 +171,7 @@ class KalmanFilterXYZAH:
         std = [
             self._std_weight_position * mean[4],  # x
             self._std_weight_position * mean[4],  # y
-            self._std_weight_position_z * mean[3],  # z
+            self._std_weight_position * mean[4],  # z
             1e-1,  # a
             self._std_weight_position * mean[4],  # h
         ]
@@ -202,14 +202,14 @@ class KalmanFilterXYZAH:
         std_pos = [
             self._std_weight_position * mean[:, 4],  # x
             self._std_weight_position * mean[:, 4],  # y
-            self._std_weight_position_z * mean[:, 3],  # z
+            self._std_weight_position * mean[:, 4],  # z
             1e-2 * np.ones_like(mean[:, 4]),  # a
             self._std_weight_position * mean[:, 4],  # h
         ]
         std_vel = [
             self._std_weight_velocity * mean[:, 4],  # vx
             self._std_weight_velocity * mean[:, 4],  # vy
-            self._std_weight_velocity_z * mean[:, 3],  # vz
+            self._std_weight_velocity * mean[:, 4],  # vz
             1e-5 * np.ones_like(mean[:, 4]),  # va
             self._std_weight_velocity * mean[:, 4],  # vh
         ]
@@ -241,6 +241,7 @@ class KalmanFilterXYZAH:
 
         Returns:
             (tuple[ndarray, ndarray]): Returns the measurement-corrected state distribution.
+
         """
         if measurement_mask is None:
             measurement_mask = np.array([True, True, True, True, True])
@@ -266,7 +267,7 @@ class KalmanFilterXYZAH:
         S = (
             covariance_proj
             + np.diag(
-                [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices]
+                [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices],
             )
             ** 2
         )
@@ -340,5 +341,4 @@ class KalmanFilterXYZAH:
         #    # If covariance is not positive definite, fallback to pseudo-inverse
         #    inv_cov = np.linalg.pinv(covariance_proj)
         #    return np.einsum("ij,ij->i", d, np.dot(d, inv_cov))
-        else:
-            raise ValueError("Invalid distance metric")
+        raise ValueError("Invalid distance metric")

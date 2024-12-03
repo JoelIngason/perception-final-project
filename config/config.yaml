@@ -43,7 +43,7 @@ stereo:
   block_size: 7
   disp12_max_diff: 13
   min_disparity: 23
-  num_disparities: 240
+  num_disparities: 120
   pre_filter_cap: 33
   speckle_range: 4
   speckle_window_size: 133

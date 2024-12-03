@@ -17,7 +17,7 @@ class STrack(BaseTrack):
     def __init__(self, xyzwh, score, cls_label):
         super().__init__()
         # xyzwh+idx or xywhaz+idx
-        assert len(xyzwh) in {6, 7}, f"expected 6 or 7 values but got {len(xyzwh)}"
+        assert len(xyzwh) in {5, 6}, f"expected 5 or 6 values but got {len(xyzwh)}"
         # Convert from [x, y, z, w, h, ...] or [x, y, z, w, h, a, ...]
         # Convert to [x1, y1, z, w, h] where (x1, y1) is top-left
         self._tlzwh = np.asarray(
@@ -31,7 +31,7 @@ class STrack(BaseTrack):
         self.score = score
         self.tracklet_len = 0
         self.cls = cls_label
-        self.idx = xyzwh[-1]
+        # self.idx = xyzwh[-1]
         self.angle = xyzwh[5] if len(xyzwh) == 7 else None
 
     @classmethod
@@ -44,9 +44,9 @@ class STrack(BaseTrack):
         if self.mean is None or self.kalman_filter is None:
             return
         mean_state = self.mean.copy()
-        # Zero the velocity if the track is not in Tracked state
-        # if self.state != TrackState.Tracked:
-        #    mean_state[7:] = 0
+        # Zero the velocity of z and aspect ratio
+        if self.state != TrackState.Tracked:
+            mean_state[7:] = 0
         self.mean, self.covariance = self.kalman_filter.predict(mean_state, self.covariance)
 
     @staticmethod
@@ -56,10 +56,10 @@ class STrack(BaseTrack):
             return
         multi_mean = np.asarray([st.mean.copy() for st in stracks])
         multi_covariance = np.asarray([st.covariance for st in stracks])
-        # for i, st in enumerate(stracks):
-        #    if st.state != TrackState.Tracked:
-        #        # Zero the z velocity and height and aspect ratio velocity
-        #        multi_mean[i][7:] = 0
+        for i, st in enumerate(stracks):
+            if st.state != TrackState.Tracked:
+                # Zero the z velocity and height and aspect ratio velocity
+                multi_mean[i][7:] = 0
 
         multi_mean, multi_covariance = STrack.shared_kalman.multi_predict(
             multi_mean,
@@ -111,7 +111,7 @@ class STrack(BaseTrack):
         self.score = new_track.score
         self.cls = new_track.cls
         self.angle = new_track.angle
-        self.idx = new_track.idx
+        # self.idx = new_track.idx
 
     def update(self, new_track, frame_id, measurement_mask=None):
         """
@@ -135,7 +135,7 @@ class STrack(BaseTrack):
         self.score = new_track.score
         self.cls = new_track.cls
         self.angle = new_track.angle
-        self.idx = new_track.idx
+        # self.idx = new_track.idx
 
     def convert_coords(self, tlzwh):
         """
@@ -204,7 +204,7 @@ class STrack(BaseTrack):
     def result(self):
         """Returns the current tracking results in the appropriate bounding box format."""
         coords = self.xyzxy
-        return coords.tolist() + [self.track_id, self.score, self.cls, self.idx]
+        return coords.tolist() + [self.track_id, self.score, self.cls]
 
     def __repr__(self):
         """Return a string representation of the STrack object including start frame, end frame, and track ID."""

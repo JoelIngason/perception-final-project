@@ -1,15 +1,12 @@
 import argparse
 import logging
 import logging.config
-from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 import yaml
-from attr import has
 
 from src.calibration.stereo_calibration import StereoCalibrator
 from src.data_loader.dataset import DataLoader, TrackedObject
@@ -31,6 +28,7 @@ def is_light_color(color):
 
     Returns:
         bool: True if the color is light, False otherwise.
+
     """
     luminance = 0.299 * color[2] + 0.587 * color[1] + 0.114 * color[0]
     return luminance > 186  # Threshold for light colors
@@ -125,7 +123,10 @@ def run(config_path: str) -> None:
 
     # Iterate over each sequence
     for seq_id, frames in data.items():
+        if seq_id == "1":
+            continue
         logger.info(f"Processing sequence {seq_id} with {len(frames)} frames.")
+        evaluator.reset()
         tracker_pedastrians.reset()
         tracker_cars.reset()
         tracker_cyclists.reset()
@@ -133,7 +134,7 @@ def run(config_path: str) -> None:
         label_files = config["data"].get("label_files", "")
         if not label_files:
             logger.error(
-                "Label file path not specified in the configuration under 'data.label_file'."
+                "Label file path not specified in the configuration under 'data.label_file'.",
             )
             return
 
@@ -194,21 +195,19 @@ def run(config_path: str) -> None:
             detections = np.hstack((detections, scores, cls_labels))
 
             # Update trackers with detections tracker with detections and measurement masks
-            # active_tracks = tracker.update(detections, measurement_masks, img_left)
+            # active_tracks = tracker_pedastrians.update(detections, measurement_masks, img_left)
             detections_pedastrians = detections[cls_labels.flatten() == 0]
-            detections_cars = detections[cls_labels.flatten() == 2]
-            detections_cyclists = detections[cls_labels.flatten() == 1]
+            detections_cars = detections[cls_labels.flatten() == 1]
+            detections_cyclists = detections[cls_labels.flatten() == 2]
 
             measurement_masks_pedastrians = measurement_masks[cls_labels.flatten() == 0]
-            measurement_masks_cars = measurement_masks[cls_labels.flatten() == 2]
-            measurement_masks_cyclists = measurement_masks[cls_labels.flatten() == 1]
-
+            measurement_masks_cars = measurement_masks[cls_labels.flatten() == 1]
+            measurement_masks_cyclists = measurement_masks[cls_labels.flatten() == 2]
             active_tracks_pedastrians = tracker_pedastrians.update(
                 detections_pedastrians,
                 measurement_masks_pedastrians,
                 img_left,
             )
-
             active_tracks_cars = tracker_cars.update(
                 detections_cars,
                 measurement_masks_cars,
@@ -245,8 +244,11 @@ def run(config_path: str) -> None:
                 + tracker_cars.lost_stracks
                 + tracker_cyclists.lost_stracks
             )
+            # lost_tracks = []
 
-            all_tracks = tracked_tracks + lost_tracks
+            all_tracks = [track for track in tracked_tracks if track.state != 3] + [
+                track for track in lost_tracks if track.state != 3
+            ]
 
             # Convert active tracks to TrackedObject instances for evaluation
             tracked_objects = []
@@ -254,21 +256,11 @@ def run(config_path: str) -> None:
                 # Extract position_3d as center coordinates
                 x1, y1, z, x2, y2 = track.xyzxy
 
-                # Estimate dimensions
-                width = x2 - x1
-                height = y2 - y1
-                length = 2.0  # Example value
-
-                # Compute position_3d as centroid
-                position_3d = [x1 + width / 2, y1 + height / 2, z]
-
-                # Compute dimensions
-                dimensions = [height, width, length]
-
                 tracked_obj = TrackedObject(
                     track_id=int(track.track_id),
                     label=names[int(track.cls)],
                     bbox=[x1, y1, x2, y2],
+                    depth=z,
                 )
                 tracked_objects.append(tracked_obj)
 
@@ -298,14 +290,16 @@ def run(config_path: str) -> None:
                         2,
                     )
 
-                    cls = cls_name
                     depth = gt_obj.location[2]
                     # Define label text
                     label = f"GT: {cls_name} - Depth: {depth:.2f}m"
 
                     # Calculate text size for background rectangle
                     (text_width, text_height), baseline = cv2.getTextSize(
-                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                        label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        1,
                     )
 
                     # Draw background rectangle for text
@@ -363,6 +357,7 @@ def run(config_path: str) -> None:
 
         # After processing all frames, generate evaluation report
         evaluator.report()
+        evaluator.create_plots(seq_id)
 
     # Release resources and close windows
     cv2.destroyAllWindows()

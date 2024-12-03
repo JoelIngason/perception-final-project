@@ -10,7 +10,7 @@ __pycache__/
 *.so
 
 # Models
-*.pt
+#*.pt
 
 # pickle files 
 *.pkl
