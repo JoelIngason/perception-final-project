@@ -71,7 +71,7 @@ class DepthEstimator:
 
         # Validate num_disparities
         if num_disparities % 16 != 0:
-            self.logger.warning(
+            self.logger.debug(
                 f"num_disparities {num_disparities} is not divisible by 16. Adjusting to nearest higher multiple.",
             )
             num_disparities = ((num_disparities // 16) + 1) * 16
@@ -235,7 +235,7 @@ class DepthEstimator:
             with np.errstate(divide="ignore", invalid="ignore"):
                 depth_map = (self.focal_length * self.baseline) / (disparity_map + 1e-8)
                 depth_map[disparity_map <= 0] = np.nan  # Mask invalid disparities
-                depth_map[depth_map < 3.0] = np.nan  # Min depth is 3m
+                depth_map[depth_map < 2.0] = np.nan  # Min depth is 3m
                 depth_map[depth_map > 60.0] = np.nan  # Cap depth values at 60m
 
             self.logger.debug("Initial depth map computed successfully.")
@@ -283,7 +283,7 @@ class DepthEstimator:
             depth_values = depth_values[~np.isnan(depth_values)]
 
             if len(depth_values) == 0:
-                self.logger.warning("No valid depth values found in the object mask.")
+                self.logger.debug("No valid depth values found in the object mask.")
                 return (np.nan, [x, y])
 
             # Use histogram analysis to find the most frequent depth
@@ -292,7 +292,7 @@ class DepthEstimator:
             peak_value = (bin_edges[peak_index] + bin_edges[peak_index + 1]) / 2
 
             if peak_value > 50.0:
-                self.logger.warning(f"Large depth value ({peak_value:.2f}m) detected for object.")
+                self.logger.debug(f"Large depth value ({peak_value:.2f}m) detected for object.")
 
             return (peak_value, [x, y])
         except Exception as e:
@@ -407,7 +407,7 @@ class DepthEstimator:
 
                 # Compare estimated depth to ground truth
                 if np.isnan(estimated_depth):
-                    self.logger.warning(f"No valid depth for object at frame {idx}")
+                    self.logger.debug(f"No valid depth for object at frame {idx}")
                     continue
 
                 error = np.abs(estimated_depth - gt_z)
