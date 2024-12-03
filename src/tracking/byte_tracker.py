@@ -611,7 +611,7 @@ class BYTETracker:
             elif (
                 self.remove_stationary and abs(track.mean[5]) <= 0.1 and abs(track.mean[6]) <= 0.1
             ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
-                print(f"Removed track {track.track_id}")
+                # print(f"Removed track {track.track_id}")
                 track.mark_removed()
                 removed_stracks.append(track)
 

@@ -258,39 +258,59 @@ class BYTETrackerHyperparameterTuner:
         # try:
         # Suggest hyperparameters for each class with unique names
         config_pedestrians = {
-            "alpha": trial.suggest_float("ped_alpha", 0.01, 2.0),
-            "beta": trial.suggest_float("ped_beta", 0.01, 2.0),
-            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 2.0),
-            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("ped_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("ped_max_avg_velocity_y", 0.1, 400.0),
+            "alpha": trial.suggest_float("ped_alpha", 0.01, 1.0),
+            "beta": trial.suggest_float("ped_beta", 0.01, 1.0),
+            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 1.0),
+            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 1.0),
+            "max_avg_velocity_x": trial.suggest_float(
+                "ped_max_avg_velocity_x",
+                0.1,
+                400.0,
+                step=10,
+            ),
+            "max_avg_velocity_y": trial.suggest_float(
+                "ped_max_avg_velocity_y",
+                0.1,
+                400.0,
+                step=10,
+            ),
             "track_buffer": trial.suggest_int("ped_track_buffer", 1, 15),
             "match_thresh": trial.suggest_float("ped_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("ped_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("ped_match_final_thresh", 0.4, 0.99),
+            "match_second_thresh": trial.suggest_float("ped_match_second_thresh", 0.2, 0.99),
+            "match_final_thresh": trial.suggest_float("ped_match_final_thresh", 0.2, 0.99),
             "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7),
             "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
-            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True, False]),
+            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True]),
         }
 
         config_cars = {
-            "alpha": trial.suggest_float("car_alpha", 0.01, 2.0),
-            "beta": trial.suggest_float("car_beta", 0.01, 2.0),
-            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 2.0),
-            "beta_second": trial.suggest_float("car_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("car_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("car_max_avg_velocity_y", 0.1, 400.0),
+            "alpha": trial.suggest_float("car_alpha", 0.01, 1.0),
+            "beta": trial.suggest_float("car_beta", 0.01, 1.0),
+            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 1.0),
+            "beta_second": trial.suggest_float("car_beta_second", 0.01, 1.0),
+            "max_avg_velocity_x": trial.suggest_float(
+                "car_max_avg_velocity_x",
+                0.1,
+                400.0,
+                step=10,
+            ),
+            "max_avg_velocity_y": trial.suggest_float(
+                "car_max_avg_velocity_y",
+                0.1,
+                400.0,
+                step=10,
+            ),
             "track_buffer": trial.suggest_int("car_track_buffer", 1, 15),
-            "match_thresh": trial.suggest_float("car_match_thresh", 0.4, 0.99),
-            "match_second_thresh": trial.suggest_float("car_match_second_thresh", 0.4, 0.99),
-            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.4, 0.99),
+            "match_thresh": trial.suggest_float("car_match_thresh", 0.2, 0.99),
+            "match_second_thresh": trial.suggest_float("car_match_second_thresh", 0.2, 0.99),
+            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.2, 0.99),
             "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.1, 0.99),
             "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.7),
             "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 0.9),
             "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
-            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True, False]),
+            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True]),
         }
 
         config_cyclists = {
@@ -298,8 +318,18 @@ class BYTETrackerHyperparameterTuner:
             "beta": trial.suggest_float("cyclist_beta", 0.01, 2.0),
             "alpha_second": trial.suggest_float("cyclist_alpha_second", 0.01, 2.0),
             "beta_second": trial.suggest_float("cyclist_beta_second", 0.01, 2.0),
-            "max_avg_velocity_x": trial.suggest_float("cyclist_max_avg_velocity_x", 0.1, 400.0),
-            "max_avg_velocity_y": trial.suggest_float("cyclist_max_avg_velocity_y", 0.1, 400.0),
+            "max_avg_velocity_x": trial.suggest_float(
+                "cyclist_max_avg_velocity_x",
+                0.1,
+                400.0,
+                step=10,
+            ),
+            "max_avg_velocity_y": trial.suggest_float(
+                "cyclist_max_avg_velocity_y",
+                0.1,
+                400.0,
+                step=10,
+            ),
             "track_buffer": trial.suggest_int("cyclist_track_buffer", 1, 15),
             "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.2, 0.99),
             "match_second_thresh": trial.suggest_float("cyclist_match_second_thresh", 0.2, 0.99),
@@ -310,7 +340,7 @@ class BYTETrackerHyperparameterTuner:
             "fuse_score": trial.suggest_categorical("cyclist_fuse_score", [True, False]),
             "remove_stationary": trial.suggest_categorical(
                 "cyclist_remove_stationary",
-                [True, False],
+                [True],
             ),
         }
 
