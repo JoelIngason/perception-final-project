@@ -38,16 +38,16 @@ tracking:
 
 # Stereo matching parameters
 stereo:
-  P1: 2254
-  P2: 6582
-  block_size: 7
-  disp12_max_diff: 13
-  min_disparity: 23
+  P1: 44076
+  P2: 144262
+  block_size: 19
+  disp12_max_diff: 2
+  min_disparity: 22
   num_disparities: 240
-  pre_filter_cap: 33
-  speckle_range: 4
-  speckle_window_size: 133
-  uniqueness_ratio: 11
+  pre_filter_cap: 58
+  speckle_range: 30
+  speckle_window_size: 29
+  uniqueness_ratio: 18
 
 # Logging configuration
 logging:

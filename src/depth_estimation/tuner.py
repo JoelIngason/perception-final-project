@@ -57,8 +57,8 @@ class DepthEstimator:
                 np.linalg.norm(self.calib_params["T_02"] - self.calib_params["T_03"])
                 * baseline_correction_factor
             )
-            self.logger.info(f"Baseline (B): {self.baseline:.4f} meters")
-            self.logger.info(f"Focal Length (f): {self.focal_length:.4f} pixels")
+            self.logger.debug(f"Baseline (B): {self.baseline:.4f} meters")
+            self.logger.debug(f"Focal Length (f): {self.focal_length:.4f} pixels")
         except KeyError as e:
             self.logger.exception(f"Missing calibration parameter: {e}")
             raise
@@ -103,7 +103,7 @@ class DepthEstimator:
                 speckleRange=speckle_range,
                 preFilterCap=pre_filter_cap,
             )
-            self.logger.info("StereoSGBM matcher initialized with parameters.")
+            self.logger.debug("StereoSGBM matcher initialized with parameters.")
         except Exception as e:
             self.logger.exception(f"Failed to initialize StereoSGBM matcher: {e}")
             raise
@@ -273,7 +273,7 @@ class DepthEstimator:
             depth_values = depth_values[~np.isnan(depth_values)]
 
             if len(depth_values) == 0:
-                self.logger.warning("No valid depth values found in the object mask.")
+                self.logger.debug("No valid depth values found in the object mask.")
                 return (np.nan, [x, y])
 
             # Use histogram analysis to find the most frequent depth
@@ -399,7 +399,7 @@ class DepthEstimator:
 
                 # Compare estimated depth to ground truth
                 if np.isnan(estimated_depth):
-                    self.logger.warning(f"No valid depth for object at frame {idx}")
+                    self.logger.debug(f"No valid depth for object at frame {idx}")
                     continue
 
                 error = np.abs(estimated_depth - gt_z)
@@ -637,7 +637,7 @@ if __name__ == "__main__":
     # Load images
     data_loader = DataLoader(config)
     images = data_loader.load_sequences_rect(calib_params=calib_params)
-    seq_1, seq_2, seq_3 = images
+    seq_1, seq_2, seq_3 = images.values()
     images_left = [frame.image_left for frame in seq_2]
     images_right = [frame.image_right for frame in seq_2]
 
@@ -661,7 +661,7 @@ if __name__ == "__main__":
         images_right=images_right,
         labels=tuning_labels,
         logger=logger,
-        n_trials=10000,  # Adjust the number of trials as needed
+        n_trials=4000,  # Adjust the number of trials as needed
     )
 
     # Run hyperparameter tuning
