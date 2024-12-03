@@ -562,9 +562,9 @@ if __name__ == "__main__":
     # Paths (Update these paths according to your directory structure)
     config_path = "config/config.yaml"
     calibration_file = "data/34759_final_project_rect/calib_cam_to_cam.txt"
-    images_left_dir = "data/34759_final_project_rect/seq_01/image_02/data/"
-    images_right_dir = "data/34759_final_project_rect/seq_01/image_03/data/"
-    labels_file = "data/34759_final_project_rect/seq_01/labels.txt"
+    images_left_dir = "data/34759_final_project_rect/seq_02/image_02/data/"
+    images_right_dir = "data/34759_final_project_rect/seq_02/image_03/data/"
+    labels_file = "data/34759_final_project_rect/seq_02/labels.txt"
 
     # Load configuration
     if not Path(config_path).is_file():
