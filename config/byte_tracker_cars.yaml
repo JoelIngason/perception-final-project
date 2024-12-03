@@ -6,8 +6,6 @@ fuse_score: true
 match_final_thresh: 0.4
 match_second_thresh: 0.3
 match_thresh: 0.8
-max_avg_velocity_x: 260.1
-max_avg_velocity_y: 310.1
 new_track_thresh: 0.3
 remove_stationary: False
 track_buffer: 500
