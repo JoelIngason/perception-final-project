@@ -184,6 +184,10 @@ class Visualizer:
                 if tr.track_id == track_id and tr.cls == track.cls:
                     lost = True
                     break
+            for tr in tracks_active:
+                if tr.track_id == track_id and tr.cls == track.cls:
+                    lost = False
+                    break
             # Define label
             if labels:
                 if depth is not None and depth > 0:

@@ -62,12 +62,12 @@ class KalmanFilterXYZAH:
         self._update_mat = np.eye(ndim, 2 * ndim)
 
         # Motion and observation uncertainty weights
-        self._std_weight_position = 1.0 / 20
+        self._std_weight_position = 1.0 / 40
         self._std_weight_velocity = 1.0 / 160
 
         # Increase uncertainty in z-axis
-        self._std_weight_position_z = 4.0 / 20  # Higher uncertainty
-        self._std_weight_velocity_z = 4.0 / 160
+        self._std_weight_position_z = 0.9
+        self._std_weight_velocity_z = 0.9
 
     def initiate(self, measurement: np.ndarray) -> tuple:
         """
