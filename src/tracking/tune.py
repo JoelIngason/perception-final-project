@@ -553,7 +553,7 @@ def main():
     parser.add_argument(
         "--n_trials",
         type=int,
-        default=5000,
+        default=1000,
         help="Number of hyperparameter optimization trials",
     )
     parser.add_argument(
