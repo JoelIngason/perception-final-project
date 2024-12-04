@@ -432,6 +432,18 @@ class BYTETracker:
             )
             # alpha = 0.3  # Weight for IoU
             # beta = 0.7  # Weight for appearance
+            spatial_dists = np.zeros(
+                (len(tracked_stracks), len(detections_second)), dtype=np.float32
+            )
+
+            # Define maximum spatial distance (e.g., 200 pixels)
+            max_spatial_dist = 200.0
+            spatial_constraint = spatial_dists <= max_spatial_dist
+
+            combined_dists = self.alpha_second * dists_second + self.beta_second * appearance_dists
+
+            # Apply spatial constraint by setting distances beyond the threshold to a high value
+            combined_dists[~spatial_constraint] = 1e6  # A large value to prevent matching
             dists_second = self.alpha_second * dists_second + self.beta_second * appearance_dists
 
         # Ensure dists_second is not empty before assignment
@@ -569,7 +581,6 @@ class BYTETracker:
             elif (
                 self.remove_stationary and abs(track.mean[5]) <= 0 and abs(track.mean[6]) <= 0
             ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
-                print(f"Removed track {track.track_id}")
                 track.mark_removed()
                 removed_stracks.append(track)
 
@@ -674,9 +685,7 @@ class BYTETracker:
         spatial_constraint = spatial_dists <= max_spatial_dist
 
         # Combine distances with weights
-        alpha = 0.5
-        beta = 0.5
-        combined_dists = alpha * iou_dists + beta * appearance_dists
+        combined_dists = self.alpha * iou_dists + self.beta * appearance_dists
 
         # Apply spatial constraint by setting distances beyond the threshold to a high value
         combined_dists[~spatial_constraint] = 1e6  # A large value to prevent matching

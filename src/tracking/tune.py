@@ -101,13 +101,14 @@ def run_tracking_pipeline(
     logger = logging.getLogger("BYTETrackerTuner")
     logger.info("BYTETracker initialized.")
 
-    for seq_id, det in detections.items():
+    for seq_id, seq_detections in detections.items():
         if seq_id == "1" or seq_id == "3":
             continue
+        # Reset the global track ID counter
         tracker_pedestrians.reset()
         tracker_cars.reset()
         tracker_cyclists.reset()
-        for frame_idx, frame_detections in det.items():
+        for frame_idx, frame_detections in seq_detections.items():
             # Prepare detections for each class
             detections_pedestrians = []
             detections_cars = []
@@ -115,32 +116,51 @@ def run_tracking_pipeline(
             mask_pedestrians = []
             mask_cars = []
             mask_cyclists = []
-            for det in frame_detections:
-                bbox = det.bbox  # Assuming bbox is [x_center, y_center, width, height]
-                depth, centroid = det.depth, det.centroid  # Assuming these are precomputed
+            for detection in frame_detections:
+                bbox = detection.bbox  # bbox is [x_center, y_center, width, height]
+                depth, centroid = (
+                    detection.depth,
+                    detection.centroid,
+                )
                 has_depth = False if depth is None or np.isnan(depth) else True
 
                 if (
                     depth is not None and not np.isnan(depth) and 0 < depth < 6
                 ):  # Example valid depth range
-                    detection = [bbox[0], bbox[1], depth, bbox[2], bbox[3], det.score, det.cls]
+                    det_values = [
+                        bbox[0],
+                        bbox[1],
+                        depth,
+                        bbox[2],
+                        bbox[3],
+                        detection.score,
+                        detection.cls,
+                    ]
                 else:
-                    detection = [bbox[0], bbox[1], 0.0, bbox[2], bbox[3], det.score, det.cls]
+                    det_values = [
+                        bbox[0],
+                        bbox[1],
+                        0.0,
+                        bbox[2],
+                        bbox[3],
+                        detection.score,
+                        detection.cls,
+                    ]
 
-                if det.cls == 0:
-                    detections_pedestrians.append(detection)
+                if detection.cls == 0:
+                    detections_pedestrians.append(det_values)
                     if has_depth:
                         mask_pedestrians.append([True, True, True, True, True])
                     else:
                         mask_pedestrians.append([True, True, False, True, True])
-                elif det.cls == 2:
-                    detections_cyclists.append(detection)
+                elif detection.cls == 2:
+                    detections_cyclists.append(det_values)
                     if has_depth:
                         mask_cyclists.append([True, True, True, True, True])
                     else:
                         mask_cyclists.append([True, True, False, True, True])
-                elif det.cls == 1:
-                    detections_cars.append(detection)
+                elif detection.cls == 1:
+                    detections_cars.append(det_values)
                     if has_depth:
                         mask_cars.append([True, True, True, True, True])
                     else:
@@ -169,7 +189,6 @@ def run_tracking_pipeline(
             )
 
             # Aggregate active tracks
-            # Only add tracks if there are any otherwise we get a numpy error
             active_tracks = []
             if len(active_tracks_pedestrians) > 0:
                 active_tracks.extend(active_tracks_pedestrians)
@@ -204,7 +223,6 @@ def run_tracking_pipeline(
                 tracked_objects.append(tracked_obj)
 
             # Evaluate the tracking performance
-
             labels = ground_truth_labels.get(frame_idx, [])
             evaluator.evaluate(tracked_objects, labels)
 
@@ -260,97 +278,103 @@ class BYTETrackerHyperparameterTuner:
         """
         # try:
         # Suggest hyperparameters for each class with unique names
+        alpha_beta_ratio_1 = trial.suggest_float("alpha_beta_ratio_1", 0.01, 1.0, step=0.01)
+        alpha_1 = 1.0 * alpha_beta_ratio_1
+        beta_1 = 1.0 - alpha_1
+        alpha_beta_ratio_2 = trial.suggest_float("alpha_beta_ratio_2", 0.01, 1.0, step=0.01)
+        alpha_2 = 1.0 * alpha_beta_ratio_2
+        beta_2 = 1.0 - alpha_2
+
         config_pedestrians = {
-            "alpha": trial.suggest_float("ped_alpha", 0.01, 1.0, step=0.01),
-            "beta": trial.suggest_float("ped_beta", 0.01, 1.0, step=0.01),
-            "alpha_second": trial.suggest_float("ped_alpha_second", 0.01, 1.0, step=0.01),
-            "beta_second": trial.suggest_float("ped_beta_second", 0.01, 1.0, step=0.01),
+            "alpha": alpha_1,
+            "beta": beta_1,
+            "alpha_second": alpha_2,
+            "beta_second": beta_2,
             "track_buffer": trial.suggest_int("ped_track_buffer", 50, 500),
             "match_thresh": trial.suggest_float("ped_match_thresh", 0.4, 1, step=0.01),
             "match_second_thresh": trial.suggest_float(
                 "ped_match_second_thresh",
-                0.1,
-                0.99,
+                0.3,
+                1,
                 step=0.01,
             ),
             "match_final_thresh": trial.suggest_float(
                 "ped_match_final_thresh",
-                0.1,
-                0.99,
-                step=0.01,
-            ),
-            "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.1, 1, step=0.01),
-            "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.1, 0.7, step=0.01),
-            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.1, 0.95, step=0.01),
-            "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
-            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True]),
-        }
-
-        config_cars = {
-            "alpha": trial.suggest_float("car_alpha", 0.01, 1.0, step=0.01),
-            "beta": trial.suggest_float("car_beta", 0.01, 1.0, step=0.01),
-            "alpha_second": trial.suggest_float("car_alpha_second", 0.01, 1.0, step=0.01),
-            "beta_second": trial.suggest_float("car_beta_second", 0.01, 1.0, step=0.01),
-            "track_buffer": trial.suggest_int("car_track_buffer", 50, 200),
-            "match_thresh": trial.suggest_float("car_match_thresh", 0.2, 1, step=0.01),
-            "match_second_thresh": trial.suggest_float(
-                "car_match_second_thresh",
-                0.1,
+                0.3,
                 1,
                 step=0.01,
             ),
-            "match_final_thresh": trial.suggest_float("car_match_final_thresh", 0.1, 1, step=0.01),
-            "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.1, 1, step=0.01),
-            "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.1, 0.75, step=0.01),
-            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.1, 1, step=0.01),
-            "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
-            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True]),
+            "track_high_thresh": trial.suggest_float("ped_track_high_thresh", 0.6, 1, step=0.01),
+            "track_low_thresh": trial.suggest_float("ped_track_low_thresh", 0.4, 1, step=0.01),
+            "new_track_thresh": trial.suggest_float("ped_new_track_thresh", 0.5, 1, step=0.01),
+            "fuse_score": trial.suggest_categorical("ped_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("ped_remove_stationary", [True]),
         }
+        alpha_beta_ratio_1_car = trial.suggest_float("alpha_beta_ratio_1_car", 0.01, 1.0, step=0.01)
+        alpha_1 = 1.0 * alpha_beta_ratio_1_car
+        beta_1 = 1.0 - alpha_1
+        alpha_beta_ratio_2 = trial.suggest_float("alpha_beta_ratio_2_car", 0.01, 1.0, step=0.01)
+        alpha_2 = 1.0 * alpha_beta_ratio_1_car
+        beta_2 = 1.0 - alpha_2
 
-        config_cyclists = {
-            "alpha": trial.suggest_float("cyclist_alpha", 0.01, 1.0, step=0.01),
-            "beta": trial.suggest_float("cyclist_beta", 0.01, 1.0, step=0.01),
-            "alpha_second": trial.suggest_float("cyclist_alpha_second", 0.01, 1.0, step=0.01),
-            "beta_second": trial.suggest_float("cyclist_beta_second", 0.01, 1.0, step=0.01),
-            "track_buffer": trial.suggest_int("cyclist_track_buffer", 20, 100),
-            "match_thresh": trial.suggest_float("cyclist_match_thresh", 0.2, 1, step=0.01),
+        config_cars = {
+            "alpha": alpha_1,
+            "beta": beta_1,
+            "alpha_second": alpha_2,
+            "beta_second": beta_2,
+            "track_buffer": trial.suggest_int("car_track_buffer", 50, 500),
+            "match_thresh": trial.suggest_float("car_match_thresh", 0.4, 1, step=0.01),
             "match_second_thresh": trial.suggest_float(
-                "cyclist_match_second_thresh",
-                0.1,
+                "car_match_second_thresh",
+                0.3,
                 1,
                 step=0.01,
             ),
             "match_final_thresh": trial.suggest_float(
-                "cyclist_match_final_thresh",
-                0.1,
+                "car_match_final_thresh",
+                0.3,
                 1,
                 step=0.01,
             ),
-            "track_high_thresh": trial.suggest_float(
-                "cyclist_track_high_thresh",
-                0.1,
-                1,
-                step=0.01,
-            ),
-            "track_low_thresh": trial.suggest_float(
-                "cyclist_track_low_thresh",
-                0.1,
-                1,
-                step=0.01,
-            ),
-            "new_track_thresh": trial.suggest_float(
-                "cyclist_new_track_thresh",
-                0.1,
-                1,
-                step=0.01,
-            ),
-            "fuse_score": trial.suggest_categorical("cyclist_fuse_score", [True, False]),
-            "remove_stationary": trial.suggest_categorical(
-                "cyclist_remove_stationary",
-                [True],
-            ),
+            "track_high_thresh": trial.suggest_float("car_track_high_thresh", 0.3, 1, step=0.01),
+            "track_low_thresh": trial.suggest_float("car_track_low_thresh", 0.2, 1, step=0.01),
+            "new_track_thresh": trial.suggest_float("car_new_track_thresh", 0.2, 1, step=0.01),
+            "fuse_score": trial.suggest_categorical("car_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("car_remove_stationary", [True]),
         }
 
+        alpha_beta_ratio_1_cyc = trial.suggest_float("alpha_beta_ratio_1_cyc", 0.01, 1.0, step=0.01)
+        alpha_1 = 1.0 * alpha_beta_ratio_1_cyc
+        beta_1 = 1.0 - alpha_1
+        alpha_beta_ratio_2_cyc = trial.suggest_float("alpha_beta_ratio_2_cyc", 0.01, 1.0, step=0.01)
+        alpha_2 = 1.0 * alpha_beta_ratio_2_cyc
+        beta_2 = 1.0 - alpha_2
+
+        config_cyclists = {
+            "alpha": alpha_1,
+            "beta": beta_1,
+            "alpha_second": alpha_2,
+            "beta_second": beta_2,
+            "track_buffer": trial.suggest_int("cyc_track_buffer", 50, 500),
+            "match_thresh": trial.suggest_float("cyc_match_thresh", 0.4, 1, step=0.01),
+            "match_second_thresh": trial.suggest_float(
+                "cyc_match_second_thresh",
+                0.3,
+                1,
+                step=0.01,
+            ),
+            "match_final_thresh": trial.suggest_float(
+                "cyc_match_final_thresh",
+                0.3,
+                1,
+                step=0.01,
+            ),
+            "track_high_thresh": trial.suggest_float("cyc_track_high_thresh", 0.3, 1, step=0.01),
+            "track_low_thresh": trial.suggest_float("cyc_track_low_thresh", 0.2, 1, step=0.01),
+            "new_track_thresh": trial.suggest_float("cyc_new_track_thresh", 0.2, 1, step=0.01),
+            "fuse_score": trial.suggest_categorical("cyc_fuse_score", [True, False]),
+            "remove_stationary": trial.suggest_categorical("cyc_remove_stationary", [True]),
+        }
         self.logger.info(f"Trial {trial.number}: Suggested hyperparameters.")
 
         # Initialize Evaluator for this trial
@@ -381,7 +405,7 @@ class BYTETrackerHyperparameterTuner:
 
         # Since Optuna minimizes by default, return negative MOTA and Precision,
         # with a penalty for extra tracks and dimension error
-        return -1.0 * (avg_mota + avg_precision)
+        return -1.0 * (avg_mota + avg_precision) + 0.1 * avg_extra_track_rate
 
     # except Exception as e:
     #    self.logger.error(f"Trial {trial.number} failed with exception: {e}")
@@ -404,7 +428,7 @@ class BYTETrackerHyperparameterTuner:
             self.objective,
             n_trials=self.n_trials,
             timeout=self.timeout,
-            n_jobs=8,
+            n_jobs=4,
             show_progress_bar=True,
         )
         self.logger.info(
@@ -529,7 +553,7 @@ def main():
     parser.add_argument(
         "--n_trials",
         type=int,
-        default=500,
+        default=5000,
         help="Number of hyperparameter optimization trials",
     )
     parser.add_argument(
