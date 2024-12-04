@@ -19,7 +19,7 @@ from src.depth_estimation.depth_estimator import DepthEstimator
 from src.evaluation.evaluator import Evaluator
 from src.models.feature_extractor.feature_extractor import FeatureExtractor
 from src.models.model import load_model
-from src.tracking.byte_tracker import BYTETracker
+from src.tracking.byte_tracker import BYTETracker, STrackFeature
 from src.utils.label_parser import GroundTruthObject, parse_labels
 
 
@@ -108,6 +108,13 @@ def run_tracking_pipeline(
         tracker_pedestrians.reset()
         tracker_cars.reset()
         tracker_cyclists.reset()
+        # reset class id counter
+        #    @classmethod
+        # def next_id(cls):
+        # cls._id += 1
+        # return cls._id
+        STrackFeature._id = 0
+
         for frame_idx, frame_detections in seq_detections.items():
             # Prepare detections for each class
             detections_pedestrians = []
@@ -428,7 +435,7 @@ class BYTETrackerHyperparameterTuner:
             self.objective,
             n_trials=self.n_trials,
             timeout=self.timeout,
-            n_jobs=4,
+            n_jobs=1,
             show_progress_bar=True,
         )
         self.logger.info(
