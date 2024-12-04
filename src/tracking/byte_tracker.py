@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ class BYTETracker:
             self.args = self.load_config(config_path)
         else:
             self.args = config_path
+        self.logger = logging.getLogger(__name__)
         self.tracked_stracks: list[STrackFeature] = []
         self.lost_stracks: list[STrackFeature] = []
         self.removed_stracks: list[STrackFeature] = []
@@ -221,7 +223,14 @@ class BYTETracker:
             track.mark_lost()
 
         if self.remove_stationary:
-            self.lost_stracks = self.mark_lost_tracks(self.lost_stracks)
+            removed = self.mark_lost_tracks(self.lost_stracks)
+            removed_ids = [track.track_id for track in removed]
+            self.lost_stracks = [
+                track for track in self.lost_stracks if track.track_id not in removed_ids
+            ]
+        # limit the size of lost_stracks
+        if len(self.lost_stracks) > 1000:
+            self.lost_stracks = self.lost_stracks[-999:]
 
         # No detections to process
         # Further handling can be implemented as needed
@@ -433,7 +442,8 @@ class BYTETracker:
             # alpha = 0.3  # Weight for IoU
             # beta = 0.7  # Weight for appearance
             spatial_dists = np.zeros(
-                (len(tracked_stracks), len(detections_second)), dtype=np.float32
+                (len(tracked_stracks), len(detections_second)),
+                dtype=np.float32,
             )
 
             # Define maximum spatial distance (e.g., 200 pixels)
@@ -575,14 +585,40 @@ class BYTETracker:
 
         """
         for track in self.lost_stracks:
+            # Check if mean is properly initialized
+            if track.mean is None:
+                self.logger.warning(f"Track ID {track.track_id} has no mean. Skipping.")
+                continue
+            if len(track.mean) < 7:
+                self.logger.warning(
+                    f"Track ID {track.track_id} has incomplete mean: {track.mean}. Skipping.",
+                )
+                continue
+
+            # Safely access mean[5] and mean[6]
+            try:
+                vx = track.mean[5]
+                vy = track.mean[6]
+            except IndexError as e:
+                self.logger.warning(
+                    f"IndexError accessing mean for Track ID {track.track_id}: {e}. Skipping.",
+                )
+                continue
+            except Exception as e:
+                self.logger.warning(
+                    f"Unexpected error accessing mean for Track ID {track.track_id}: {e}. Skipping.",
+                )
+                continue
+
+            # Check if track has been lost for too long
             if self.frame_id - track.end_frame > self.max_time_lost:
                 track.mark_removed()
                 removed_stracks.append(track)
-            elif (
-                self.remove_stationary and abs(track.mean[5]) <= 0 and abs(track.mean[6]) <= 0
-            ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
+                self.logger.debug(f"Track ID {track.track_id} removed due to max_time_lost.")
+            elif self.remove_stationary and abs(vx) <= 0 and abs(vy) <= 0:
                 track.mark_removed()
                 removed_stracks.append(track)
+                self.logger.debug(f"Track ID {track.track_id} removed due to being stationary.")
 
         return removed_stracks
 

@@ -117,6 +117,7 @@ def run(config_path: str) -> None:
 
     # Initialize Visualizer
     visualizer = Visualizer()
+    visualizer.enable_video_save("output_video.mp4", fps=10, codec="h264")
 
     # Make OpenCV window resizable
     cv2.namedWindow("Autonomous Perception", cv2.WINDOW_NORMAL)
@@ -341,9 +342,9 @@ def run(config_path: str) -> None:
                 font=cv2.FONT_HERSHEY_SIMPLEX,
                 labels=True,
                 show=True,  # Set to True to display the annotated image
-                save=False,  # Set to True to save the annotated image
                 filename=None,  # Specify a filename if saving is enabled
                 color_mode="class",
+                save=False,
                 centroids=centroids,
             )
 
@@ -356,6 +357,8 @@ def run(config_path: str) -> None:
         # After processing all frames, generate evaluation report
         evaluator.report()
         evaluator.create_plots(seq_id)
+
+    visualizer.release_video_save()
 
     # Release resources and close windows
     cv2.destroyAllWindows()

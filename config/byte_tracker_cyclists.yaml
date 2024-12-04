@@ -8,6 +8,6 @@ match_second_thresh: 0.55
 match_thresh: 0.5
 new_track_thresh: 0.2
 remove_stationary: true
-track_buffer: 50
+track_buffer: 500
 track_high_thresh: 0.7
 track_low_thresh: 0.2

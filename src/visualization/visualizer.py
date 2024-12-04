@@ -65,6 +65,12 @@ class Visualizer:
         self.max_width = int(self.screen_width * 0.9)
         self.max_height = int(self.screen_height * 0.9)
 
+        # Initialize video saving attributes
+        self.video_writer = None
+        self.video_save_path = None
+        self.video_fps = 10  # Default FPS
+        self.video_codec = "h264"  # Default codec
+
     def get_screen_resolution(self):
         """Retrieve the primary monitor's resolution."""
         try:
@@ -78,6 +84,31 @@ class Visualizer:
         """Reset the visualizer state for a new sequence."""
         self.selected_track_id = None
         self.track_info = {}
+
+    def enable_video_save(self, video_path, fps=30, codec="mp4v"):
+        """
+        Enable video saving by specifying the video file path, frames per second, and codec.
+
+        Args:
+            video_path (str): Path to save the video file.
+            fps (int, optional): Frames per second for the video. Defaults to 30.
+            codec (str, optional): FourCC codec for the video. Defaults to 'mp4v'.
+
+        """
+        self.video_save_path = video_path
+        self.video_fps = fps
+        self.video_codec = codec
+        self.logger.info(
+            f"Video saving enabled. Video will be saved to {self.video_save_path} with FPS={self.video_fps} and codec={self.video_codec}.",
+        )
+
+    def release_video_save(self):
+        """Release the video writer and finalize the video file."""
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.logger.info(f"Video saved to {self.video_save_path}")
+            self.video_writer = None
+            self.video_save_path = None
 
     def display(
         self,
@@ -137,8 +168,6 @@ class Visualizer:
         self.logger.debug(f"All tracks: {len(all_tracks)}")
 
         # Generate a color map for track IDs based on class
-        # Red for pedestrians, green for cyclists, blue for vehicles
-        # pedastrians: 0, cyclists: 1, vehicles: 2
         if color_mode == "class":
             colors = {
                 0: (255, 0, 0),  # Red for class ID 0
@@ -192,18 +221,18 @@ class Visualizer:
             if labels:
                 if depth is not None and depth > 0:
                     label = (
-                        f"ID:{track_id} {cls_name} {score:.2f} D:{depth:.2f}m {"L" if lost else "A" }"
+                        f"ID:{track_id} {cls_name} {score:.2f} D:{depth:.2f}m {'L' if lost else 'A'}"
                         if conf
-                        else f"ID:{track_id} {cls_name} D:{depth:.2f}m {"L" if lost else "A" }"
+                        else f"ID:{track_id} {cls_name} D:{depth:.2f}m {'L' if lost else 'A'}"
                     )
                 else:
                     label = (
-                        f"ID:{track_id} {cls_name} {score:.2f} {"L" if lost else "A" }"
+                        f"ID:{track_id} {cls_name} {score:.2f} {'L' if lost else 'A'}"
                         if conf
-                        else f"ID:{track_id} {cls_name} {"L" if lost else "A" }"
+                        else f"ID:{track_id} {cls_name} {'L' if lost else 'A'}"
                     )
             else:
-                label = f"ID:{track_id}" if conf else f"ID:{track_id} {"L" if lost else "A" }"
+                label = f"ID:{track_id}" if conf else f"ID:{track_id} {'L' if lost else 'A'}"
 
             # Choose color
             color = colors[cls_id] if cls_id in colors else self.default_color
@@ -243,7 +272,7 @@ class Visualizer:
         # Create a depth heatmap
         depth_heatmap = self._create_depth_heatmap(depth_map)
 
-        # draw centroids on depth map
+        # Draw centroids on depth map
         for centroid in centroids:
             cv2.circle(depth_heatmap, (int(centroid[0]), int(centroid[1])), 5, (0, 255, 0), -1)
 
@@ -286,12 +315,37 @@ class Visualizer:
                 "Combined visualization fits within screen dimensions. No resizing applied.",
             )
 
-        # Save results
+        # Save individual frame if requested
         if save:
             if filename is None:
                 filename = "annotated_image.jpg"
             cv2.imwrite(filename, combined_visualization)
             self.logger.info(f"Annotated image saved as {filename}")
+
+        # Save frame to video if video saving is enabled
+        if self.video_save_path is not None:
+            if self.video_writer is None:
+                # Initialize VideoWriter with the size of the first frame
+                height, width = combined_visualization.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*self.video_codec)
+                self.video_writer = cv2.VideoWriter(
+                    self.video_save_path,
+                    fourcc,
+                    self.video_fps,
+                    (width, height),
+                )
+                if not self.video_writer.isOpened():
+                    self.logger.error(
+                        f"Failed to open video file for writing: {self.video_save_path}",
+                    )
+                    self.video_writer = None
+                else:
+                    self.logger.info(
+                        f"VideoWriter initialized: {self.video_save_path}, FPS={self.video_fps}, Codec={self.video_codec}",
+                    )
+            if self.video_writer is not None:
+                self.video_writer.write(combined_visualization)
+                self.logger.debug("Frame written to video.")
 
         # Display the combined visualization
         if show:
