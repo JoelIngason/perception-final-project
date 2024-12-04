@@ -1,0 +1,5 @@
+Per-Class Average Precision (AP):
+Class 'Pedestrian': AP=0.9906
+Class 'Cyclist': AP=-0.0000
+
+Mean Average Precision (mAP): 0.4953

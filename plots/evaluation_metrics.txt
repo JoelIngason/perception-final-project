@@ -1,0 +1,8 @@
+YOLO Evaluation Results:
+Total True Positives (TP): 630
+Total False Positives (FP): 285
+Total False Negatives (FN): 253
+Overall Precision: 0.6885
+Overall Recall: 0.7135
+Overall F1 Score: 0.7008
+Overall MOTA: 0.3907
