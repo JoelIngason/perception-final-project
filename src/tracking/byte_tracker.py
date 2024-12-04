@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,14 @@ class BYTETracker:
             self.args = self.load_config(config_path)
         else:
             self.args = config_path
+        self.logger = logging.getLogger(__name__)
+        # Configure logger
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s")
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        # self.logger.setLevel(logging.INFO)  # Set to DEBUG to capture all messages
+
         self.tracked_stracks: list[STrackFeature] = []
         self.lost_stracks: list[STrackFeature] = []
         self.removed_stracks: list[STrackFeature] = []
@@ -98,23 +107,40 @@ class BYTETracker:
 
         """
         self.frame_id += 1
+        self.logger.debug(
+            f"Frame {self.frame_id}: Starting update with {len(detections)} detections.",
+        )
+        # Reset the update flags for all tracks
+        for track in self.tracked_stracks + self.lost_stracks:
+            if isinstance(track, STrackFeature):
+                track.updated_in_frame = False
+
         activated_stracks: list[STrackFeature] = []
         refind_stracks: list[STrackFeature] = []
         lost_stracks: list[STrackFeature] = []
         removed_stracks: list[STrackFeature] = []
 
         if detections.size == 0:
+            self.logger.debug("No detections in current frame.")
             self.handle_no_detections()
             return self.get_active_tracks()
 
         # Process detections
         bboxes, scores, cls = self.extract_detection_components(detections)
+        self.logger.debug(f"Extracted {len(bboxes)} bounding boxes from detections.")
+
         detections, scores_keep, cls_keep, dets_second, scores_second, cls_second = (
             self.split_detections(bboxes, scores, cls)
+        )
+        self.logger.debug(
+            f"Split detections into {len(detections)} high-score and {len(dets_second)} low-score detections.",
         )
 
         # Extract features for high-score detections
         features_keep = self.extract_features(dets_keep=detections, img=img)
+        self.logger.debug(
+            f"Extracted features for high-score detections: {features_keep is not None}.",
+        )
 
         detections_high = self.init_track(
             dets=detections,
@@ -122,17 +148,25 @@ class BYTETracker:
             cls_labels=cls_keep,
             features=features_keep,
         )
+        self.logger.debug(f"Initialized {len(detections_high)} high-score track features.")
 
         # Separate confirmed and unconfirmed tracks
         unconfirmed, tracked_stracks = self.separate_stracks()
+        self.logger.debug(
+            f"Separated into {len(unconfirmed)} unconfirmed and {len(tracked_stracks)} confirmed tracks.",
+        )
 
         # Step 1: First association with high score detections
         strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        self.logger.debug(f"Joint strack pool size: {len(strack_pool)}.")
         self.multi_predict(strack_pool)
         dists = self.get_dists(strack_pool, detections_high)
         matches, u_track, u_detection = linear_assignment(
             dists,
             thresh=self.args.match_thresh,
+        )
+        self.logger.debug(
+            f"First association: {len(matches)} matches, {len(u_track)} unmatched tracks, {len(u_detection)} unmatched detections.",
         )
 
         # Process matches
@@ -145,6 +179,9 @@ class BYTETracker:
             u_detection,
             activated_stracks,
             refind_stracks,
+        )
+        self.logger.debug(
+            f"After processing matches: {len(activated_stracks)} activated, {len(refind_stracks)} refound.",
         )
 
         # Step 2: Second association with low score detections
@@ -163,6 +200,9 @@ class BYTETracker:
                 activated_stracks,
                 refind_stracks,
             )
+            self.logger.debug(
+                f"After second association: {len(activated_stracks)} activated, {len(refind_stracks)} refound, {len(lost_stracks)} lost.",
+            )
 
         # Step 3: Associate unconfirmed tracks with remaining detections
         (
@@ -178,6 +218,9 @@ class BYTETracker:
             activated_stracks,
             removed_stracks,
         )
+        self.logger.debug(
+            f"After associating unconfirmed tracks: {len(activated_stracks)} activated, {len(removed_stracks)} removed.",
+        )
 
         # Step 4: Activate new tracks for unmatched detections
         activated_stracks = self.activate_new_tracks(
@@ -185,17 +228,26 @@ class BYTETracker:
             u_detection,
             activated_stracks,
         )
+        self.logger.debug(
+            f"After activating new tracks: {len(activated_stracks)} total activated tracks.",
+        )
 
         # Step 5: Mark tracks as removed if they have been lost for too long
         removed_stracks = self.mark_lost_tracks(removed_stracks)
+        self.logger.debug(f"After marking lost tracks: {len(removed_stracks)} tracks removed.")
 
         # Update track lists
         self.update_track_lists(activated_stracks, refind_stracks, lost_stracks, removed_stracks)
+        self.logger.debug(
+            f"After updating track lists: {len(self.tracked_stracks)} tracked, {len(self.lost_stracks)} lost, {len(self.removed_stracks)} removed.",
+        )
+
         # Fix weird bug where tracks are not properly removed
         ids_remove = []
         for track in self.tracked_stracks + self.lost_stracks + self.removed_stracks:
             if track.state == TrackState.Removed:
                 ids_remove.append(track.track_id)
+                self.logger.debug(f"Track ID {track.track_id} marked as removed.")
 
         self.tracked_stracks = [
             track for track in self.tracked_stracks if track.track_id not in ids_remove
@@ -206,6 +258,21 @@ class BYTETracker:
         self.removed_stracks = [
             track for track in self.removed_stracks if track.track_id not in ids_remove
         ]
+        self.logger.debug(
+            f"Final track counts after removal fix: {len(self.tracked_stracks)} tracked, {len(self.lost_stracks)} lost, {len(self.removed_stracks)} removed.",
+        )
+
+        # Make sure all the tracks in the tracked_stracks are activated and lost_stracks are not activated
+        for track in self.tracked_stracks:
+            if track.state != TrackState.Tracked:
+                # remove the track from the list
+                self.tracked_stracks.remove(track)
+                self.lost_stracks.append(track)
+        for track in self.lost_stracks:
+            if track.state != TrackState.Lost:
+                # remove the track from the list
+                self.lost_stracks.remove(track)
+                self.removed_stracks.append(track)
 
         return self.get_active_tracks()
 
@@ -221,7 +288,14 @@ class BYTETracker:
             track.mark_lost()
 
         if self.remove_stationary:
-            self.lost_stracks = self.mark_lost_tracks(self.lost_stracks)
+            removed = self.mark_lost_tracks(self.lost_stracks)
+            removed_ids = [track.track_id for track in removed]
+            self.lost_stracks = [
+                track for track in self.lost_stracks if track.track_id not in removed_ids
+            ]
+        # limit the size of lost_stracks
+        if len(self.lost_stracks) > 1000:
+            self.lost_stracks = self.lost_stracks[-999:]
 
         # No detections to process
         # Further handling can be implemented as needed
@@ -253,7 +327,7 @@ class BYTETracker:
             Tuple[np.ndarray, np.ndarray, np.ndarray]: Bounding boxes, scores, and class labels.
 
         """
-        bboxes = detections[:, :5]  # [x, y, z, a, h]
+        bboxes = detections[:, :5]  # [x, y, z, w, h]
         # Add index column to bboxes
         bboxes = np.concatenate([bboxes, np.arange(len(bboxes)).reshape(-1, 1)], axis=-1)
         scores = detections[:, 5]
@@ -341,34 +415,42 @@ class BYTETracker:
         refind_stracks: list[STrackFeature],
     ) -> tuple[np.ndarray, np.ndarray, list[STrackFeature], list[STrackFeature]]:
         """
-        Process matched tracks and detections.
-
-        Args:
-            matches (List[Tuple[int, int]]): List of matched track and detection indices.
-            strack_pool (List[STrackFeature]): Pool of tracks available for matching.
-            detections_high (List[STrackFeature]): High-score detections.
-            measurement_masks (np.ndarray): Measurement masks for detections.
-            u_track (np.ndarray): Unmatched track indices.
-            u_detection (np.ndarray): Unmatched detection indices.
-            activated_stracks (List[STrackFeature]): List to store activated stracks.
-            refind_stracks (List[STrackFeature]): List to store refound stracks.
+        Process matched tracks and detections, ensuring each track and detection is matched only once.
 
         Returns:
             Updated u_track, u_detection, activated_stracks, refind_stracks.
 
         """
+        seen_tracks = set()
+        seen_detections = set()
         for itracked, idet in matches:
+            if itracked in seen_tracks or idet in seen_detections:
+                self.logger.warning(
+                    f"Duplicate match detected: Track {itracked} or Detection {idet} already matched.",
+                )
+                continue
+            seen_tracks.add(itracked)
+            seen_detections.add(idet)
+
             track = strack_pool[itracked]
             det = detections_high[idet]
             mask = measurement_masks[idet]
 
+            self.logger.debug(
+                f"Matching Track ID {track.track_id} with Detection ID {det.track_id}.",
+            )
+
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id, measurement_mask=mask)
                 activated_stracks.append(track)
+                self.logger.debug(f"Track ID {track.track_id} updated and activated.")
             else:
                 track.re_activate(det, self.frame_id, measurement_mask=mask, new_id=False)
                 refind_stracks.append(track)
+                self.logger.debug(f"Track ID {track.track_id} re-activated.")
 
+        # Log the final count of unique matches
+        self.logger.debug(f"Processed {len(seen_tracks)} unique matches.")
         return u_track, u_detection, activated_stracks, refind_stracks
 
     def second_association(
@@ -430,23 +512,19 @@ class BYTETracker:
                 np.array([det.feature for det in detections_second]),
                 metric="cosine",
             )
-            # alpha = 0.3  # Weight for IoU
-            # beta = 0.7  # Weight for appearance
-            spatial_dists = np.zeros(
-                (len(tracked_stracks), len(detections_second)), dtype=np.float32
-            )
-
             # Define maximum spatial distance (e.g., 200 pixels)
             max_spatial_dist = 200.0
-            spatial_constraint = spatial_dists <= max_spatial_dist
+            spatial_constraint = np.zeros_like(dists_second) <= max_spatial_dist  # Adjusted
 
             combined_dists = self.alpha_second * dists_second + self.beta_second * appearance_dists
 
             # Apply spatial constraint by setting distances beyond the threshold to a high value
             combined_dists[~spatial_constraint] = 1e6  # A large value to prevent matching
-            dists_second = self.alpha_second * dists_second + self.beta_second * appearance_dists
+            dists_second = combined_dists
 
-        # Ensure dists_second is not empty before assignment
+        # Initialize lost_stracks
+        lost_stracks = []
+
         if dists_second.size > 0:
             matches_second, u_track_second, u_detection_second = linear_assignment(
                 dists_second,
@@ -458,28 +536,43 @@ class BYTETracker:
                 det = detections_second[idet]
                 mask = measurement_masks[idet]
 
+                self.logger.debug(
+                    f"Second Association - Matching Track ID {track.track_id} with Detection ID {det.track_id}.",
+                )
+
                 if track.state == TrackState.Tracked:
                     track.update(det, self.frame_id, measurement_mask=mask)
                     activated_stracks.append(track)
+                    self.logger.debug(f"Track ID {track.track_id} updated and activated.")
                 else:
                     track.re_activate(det, self.frame_id, measurement_mask=mask, new_id=False)
                     refind_stracks.append(track)
+                    self.logger.debug(f"Track ID {track.track_id} re-activated.")
 
             # Handle unmatched tracks after second association
-            lost_stracks = []
             for it in u_track_second:
                 track = tracked_stracks[it]
                 if track.state != TrackState.Lost:
                     track.mark_lost()
                     lost_stracks.append(track)
+                    self.logger.debug(
+                        f"Track ID {track.track_id} marked as lost in second association.",
+                    )
+        else:
+            # No detections to associate; mark all tracked_stracks as lost
+            for track in tracked_stracks:
+                if track.state != TrackState.Lost:
+                    track.mark_lost()
+                    lost_stracks.append(track)
+                    self.logger.debug(
+                        f"Track ID {track.track_id} marked as lost due to no detections in second association.",
+                    )
 
-            return (
-                activated_stracks,
-                refind_stracks,
-                lost_stracks,
-            )
-
-        return activated_stracks, refind_stracks, []
+        return (
+            activated_stracks,
+            refind_stracks,
+            lost_stracks,
+        )
 
     def associate_unconfirmed_tracks(
         self,
@@ -572,17 +665,50 @@ class BYTETracker:
 
         Returns:
             List[STrackFeature]: Removed stracks.
-
         """
         for track in self.lost_stracks:
-            if self.frame_id - track.end_frame > self.max_time_lost:
+            # Check if mean is properly initialized
+            if track.mean is None:
+                self.logger.warning(f"Track ID {track.track_id} has no mean. Skipping.")
+                continue
+            if len(track.mean) < 7:
+                self.logger.warning(
+                    f"Track ID {track.track_id} has incomplete mean: {track.mean}. Skipping.",
+                )
+                continue
+
+            # Safely access mean[5] and mean[6]
+            try:
+                vx = track.mean[5]
+                vy = track.mean[6]
+            except IndexError as e:
+                self.logger.warning(
+                    f"IndexError accessing mean for Track ID {track.track_id}: {e}. Skipping.",
+                )
+                continue
+            except Exception as e:
+                self.logger.warning(
+                    f"Unexpected error accessing mean for Track ID {track.track_id}: {e}. Skipping.",
+                )
+                continue
+
+            # Log current velocity
+            self.logger.debug(
+                f"Track ID {track.track_id}: Velocity (vx={vx}, vy={vy}), Frame ID={self.frame_id}, End Frame={track.end_frame}.",
+            )
+
+            # Check if track has been lost for too long
+            time_lost = self.frame_id - track.end_frame
+            if time_lost > self.max_time_lost:
                 track.mark_removed()
                 removed_stracks.append(track)
-            elif (
-                self.remove_stationary and abs(track.mean[5]) <= 0 and abs(track.mean[6]) <= 0
-            ):  # (x, y, z, a, h, vx, vy, vz, va, vh)
+                self.logger.debug(
+                    f"Track ID {track.track_id} removed due to max_time_lost ({time_lost} frames).",
+                )
+            elif self.remove_stationary and abs(vx) <= 0 and abs(vy) <= 0:
                 track.mark_removed()
                 removed_stracks.append(track)
+                self.logger.debug(f"Track ID {track.track_id} removed due to being stationary.")
 
         return removed_stracks
 
@@ -601,22 +727,42 @@ class BYTETracker:
             refind_stracks (List[STrackFeature]): Refound stracks.
             lost_stracks (List[STrackFeature]): Lost stracks.
             removed_stracks (List[STrackFeature]): Removed stracks.
-
         """
-        # Update track lists
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
+        # Step 1: Remove tracks from tracked_stracks that are no longer Tracked
+        # self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
+
+        # Step 2: Add activated and refound stracks to tracked_stracks
+        self.tracked_stracks = self.joint_stracks(refind_stracks, activated_stracks)
+        # self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
+
+        # Step 3: Remove activated and refound tracks from lost_stracks
+        activated_ids = set(track.track_id for track in activated_stracks + refind_stracks)
+        self.lost_stracks = [t for t in self.lost_stracks if t.track_id not in activated_ids]
+
+        # Step 4: Add new lost_stracks
         self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(
-            self.tracked_stracks,
-            self.lost_stracks,
-        )
+
+        # Step 5: Remove any tracks from lost_stracks that are now removed
+        removed_ids = set(track.track_id for track in removed_stracks)
+        self.lost_stracks = [t for t in self.lost_stracks if t.track_id not in removed_ids]
+
+        # Step 6: Add to removed_stracks
         self.removed_stracks.extend(removed_stracks)
+
+        # Step 7: Limit removed_stracks size
         if len(self.removed_stracks) > 1000:
             self.removed_stracks = self.removed_stracks[-999:]
+
+        # Remove any track from tracked_stracks that are now removed or lost
+        self.tracked_stracks = [t for t in self.tracked_stracks if t.track_id not in removed_ids]
+        self.tracked_stracks = [t for t in self.tracked_stracks if t.track_id not in lost_stracks]
+
+        # Debug Logging
+        self.logger.debug(
+            f"Track Lists Updated - Tracked: {[t.track_id for t in self.tracked_stracks]}, "
+            f"Lost: {[t.track_id for t in self.lost_stracks]}, "
+            f"Removed: {[t.track_id for t in self.removed_stracks]}."
+        )
 
     def init_track(
         self,
@@ -655,7 +801,7 @@ class BYTETracker:
             for xyzwh, s, c, f in zip(dets, scores, cls_labels, feature_iter, strict=False)
         ]
 
-    def get_dists(self, tracks, detections):
+    def get_dists(self, tracks: list[STrackFeature], detections: list[STrackFeature]) -> np.ndarray:
         """
         Calculate the distance between tracks and detections using both IoU and appearance features.
         """
@@ -677,8 +823,21 @@ class BYTETracker:
         spatial_dists = np.zeros((len(tracks), len(detections)), dtype=np.float32)
         for t, track in enumerate(tracks):
             for d, det in enumerate(detections):
-                #  det[:4] contains [x, y, z, a], use x and y for spatial distance
-                spatial_dists[t, d] = euclidean(track.mean[:2], det.xyxy[:2])
+                (
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                ) = track.xyxy
+                center_track = np.array([(x1 + x2) / 2, (y1 + y2) / 2])
+                (
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                ) = det.xyxy
+                center_det = np.array([(x1 + x2) / 2, (y1 + y2) / 2])
+                spatial_dists[t, d] = euclidean(center_track, center_det)
 
         # Define maximum spatial distance (e.g., 200 pixels)
         max_spatial_dist = 200.0
@@ -700,7 +859,10 @@ class BYTETracker:
             tracks (List[STrackFeature]): List of tracks to predict.
 
         """
-        STrackFeature.multi_predict(tracks)
+        # STrackFeature.multi_predict(tracks)
+        for track in tracks:
+            track.mean, track.covariance = self.kalman_filter.predict(track.mean, track.covariance)
+            self.logger.debug(f"Track ID {track.track_id} predicted to mean {track.mean}.")
 
     def get_kalmanfilter(self) -> KalmanFilterXYZAH:
         """

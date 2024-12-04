@@ -41,8 +41,9 @@ def setup_logger(name: str, config_file: str | None = None) -> logging.Logger:
             config = yaml.safe_load(f)
             logging.config.dictConfig(config)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
     return logger
 
 
@@ -117,6 +118,7 @@ def run(config_path: str) -> None:
 
     # Initialize Visualizer
     visualizer = Visualizer()
+    visualizer.enable_video_save("output_video.mp4", fps=10, codec="h264")
 
     # Make OpenCV window resizable
     cv2.namedWindow("Autonomous Perception", cv2.WINDOW_NORMAL)
@@ -168,7 +170,7 @@ def run(config_path: str) -> None:
                 depth, centroid = depth_estimator.compute_object_depth(bbox, depth_map)
                 centroids.append(centroid)
                 if (
-                    depth is not None and not np.isnan(depth) and 0 < depth < 6
+                    depth is not None and not np.isnan(depth) and 0 < depth < 60
                 ):  # Example valid depth range
                     detection = [bbox[0], bbox[1], depth, bbox[2], bbox[3]]
                     mask = [True, True, True, True, True]
@@ -196,6 +198,8 @@ def run(config_path: str) -> None:
 
             # Update trackers with detections tracker with detections and measurement masks
             # active_tracks = tracker_pedastrians.update(detections, measurement_masks, img_left)
+            # After splitting detections by class labels
+
             detections_pedastrians = detections[cls_labels.flatten() == 0]
             detections_cars = detections[cls_labels.flatten() == 1]
             detections_cyclists = detections[cls_labels.flatten() == 2]
@@ -203,6 +207,18 @@ def run(config_path: str) -> None:
             measurement_masks_pedastrians = measurement_masks[cls_labels.flatten() == 0]
             measurement_masks_cars = measurement_masks[cls_labels.flatten() == 1]
             measurement_masks_cyclists = measurement_masks[cls_labels.flatten() == 2]
+
+            # Add logging to verify exclusivity
+            total_detections_assigned = (
+                len(detections_pedastrians) + len(detections_cars) + len(detections_cyclists)
+            )
+            assert total_detections_assigned == len(
+                detections
+            ), "Some detections are not assigned to any tracker."
+            logger.debug(
+                f"All detections assigned: {total_detections_assigned} out of {len(detections)}."
+            )
+
             active_tracks_pedastrians = tracker_pedastrians.update(
                 detections_pedastrians,
                 measurement_masks_pedastrians,
@@ -343,9 +359,9 @@ def run(config_path: str) -> None:
                 font=cv2.FONT_HERSHEY_SIMPLEX,
                 labels=True,
                 show=True,  # Set to True to display the annotated image
-                save=False,  # Set to True to save the annotated image
                 filename=None,  # Specify a filename if saving is enabled
                 color_mode="class",
+                save=False,
                 centroids=centroids,
             )
 
@@ -358,6 +374,8 @@ def run(config_path: str) -> None:
         # After processing all frames, generate evaluation report
         evaluator.report()
         evaluator.create_plots(seq_id)
+
+    visualizer.release_video_save()
 
     # Release resources and close windows
     cv2.destroyAllWindows()

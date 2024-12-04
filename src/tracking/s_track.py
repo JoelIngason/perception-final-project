@@ -233,13 +233,19 @@ class STrackFeature(STrack):
         super().__init__(xyzwh, score, cls_label)
         self.feature = feature  # Deep feature embedding
         self.history = {}  # To store history for debugging
+        self.updated_in_frame = False  # Flag to prevent multiple updates per frame
 
     def update(self, new_track, frame_id, measurement_mask=None):
+        if self.updated_in_frame:
+            print(f"Warning: Track {self.track_id} updated multiple times in frame {frame_id}")
         super().update(new_track, frame_id, measurement_mask)
         self.feature = new_track.feature  # Update feature
         self.history[frame_id] = self.tlzwh  # Store history
+        self.updated_in_frame = True  # Set the flag
 
     def re_activate(self, new_track, frame_id, measurement_mask=None, new_id=False):
+        if self.updated_in_frame:
+            print(f"Warning: Track {self.track_id} updated multiple times in frame {frame_id}")
         super().re_activate(new_track, frame_id, measurement_mask, new_id)
         self.feature = new_track.feature  # Update feature
         self.history[frame_id] = self.tlzwh  # Store history
