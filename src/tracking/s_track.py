@@ -45,8 +45,8 @@ class STrack(BaseTrack):
             return
         mean_state = self.mean.copy()
         # Zero the velocity of z and aspect ratio
-        # if self.state != TrackState.Tracked:
-        #    mean_state[7:] = 0
+        if self.state != TrackState.Tracked:
+            mean_state[7:] = 0
         self.mean, self.covariance = self.kalman_filter.predict(mean_state, self.covariance)
 
     @staticmethod
@@ -56,10 +56,10 @@ class STrack(BaseTrack):
             return
         multi_mean = np.asarray([st.mean.copy() for st in stracks])
         multi_covariance = np.asarray([st.covariance for st in stracks])
-        # for i, st in enumerate(stracks):
-        #    if st.state != TrackState.Tracked:
-        #        # Zero the z velocity and height and aspect ratio velocity
-        #        multi_mean[i][7:] = 0
+        for i, st in enumerate(stracks):
+            if st.state != TrackState.Tracked:
+                # Zero the z velocity and height and aspect ratio velocity
+                multi_mean[i][7:] = 0
 
         multi_mean, multi_covariance = STrack.shared_kalman.multi_predict(
             multi_mean,

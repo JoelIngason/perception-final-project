@@ -125,6 +125,8 @@ def run(config_path: str) -> None:
 
     # Iterate over each sequence
     for seq_id, frames in data.items():
+        if seq_id == "1":
+            continue
         logger.info(f"Processing sequence {seq_id} with {len(frames)} frames.")
         evaluator.reset()
         tracker_pedastrians.reset()

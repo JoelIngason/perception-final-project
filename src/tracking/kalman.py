@@ -19,8 +19,6 @@ class KalmanFilterXYZAH:
         _update_mat (np.ndarray): The update matrix for the Kalman filter.
         _std_weight_position (float): Standard deviation weight for position.
         _std_weight_velocity (float): Standard deviation weight for velocity.
-        _std_weight_position_z (float): Standard deviation weight for z-axis position.
-        _std_weight_velocity_z (float): Standard deviation weight for z-axis velocity.
 
     Methods:
         initiate: Creates a track from an unassociated measurement.
@@ -64,12 +62,12 @@ class KalmanFilterXYZAH:
         self._update_mat = np.eye(ndim, 2 * ndim)
 
         # Motion and observation uncertainty weights
-        self._std_weight_position = 1.0 / 10
-        self._std_weight_velocity = 1.0 / 20
+        self._std_weight_position = 1.0 / 40
+        self._std_weight_velocity = 1.0 / 160
 
         # Increase uncertainty in z-axis
         self._std_weight_position_z = 0.9
-        self._std_weight_velocity_z = 0.5
+        self._std_weight_velocity_z = 0.9
 
     def initiate(self, measurement: np.ndarray) -> tuple:
         """
@@ -106,6 +104,9 @@ class KalmanFilterXYZAH:
             10 * self._std_weight_velocity * measurement[4],  # vh
         ]
         covariance = np.diag(np.square(std))
+        # Increase z-axis covariance
+        covariance[2, 2] = np.square(4 * self._std_weight_position_z * measurement[4])
+        covariance[7, 7] = np.square(20 * self._std_weight_velocity_z * measurement[4])
         return mean, covariance
 
     def predict(self, mean: np.ndarray, covariance: np.ndarray) -> tuple:
@@ -126,7 +127,6 @@ class KalmanFilterXYZAH:
             >>> predicted_mean, predicted_covariance = kf.predict(mean, covariance)
 
         """
-        # Apply z-specific standard deviation weights
         std_pos = [
             self._std_weight_position * mean[4],  # x
             self._std_weight_position * mean[4],  # y
@@ -173,7 +173,7 @@ class KalmanFilterXYZAH:
             self._std_weight_position * mean[4],  # y
             self._std_weight_position_z * mean[4],  # z
             1e-1,  # a
-            self._std_weight_position * mean[4],  # h
+            self._std_weight_position_z * mean[4],  # h
         ]
         innovation_cov = np.diag(np.square(std))
 
@@ -199,33 +199,27 @@ class KalmanFilterXYZAH:
             >>> predicted_mean, predicted_covariance = kalman_filter.multi_predict(mean, covariance)
 
         """
-        # Apply z-specific standard deviation weights
-        std_pos = np.vstack(
-            [
-                self._std_weight_position * mean[:, 4],  # x
-                self._std_weight_position * mean[:, 4],  # y
-                self._std_weight_position_z * mean[:, 4],  # z
-                1e-2 * np.ones_like(mean[:, 4]),  # a
-                self._std_weight_position * mean[:, 4],  # h
-            ],
-        ).T
-        std_vel = np.vstack(
-            [
-                self._std_weight_velocity * mean[:, 4],  # vx
-                self._std_weight_velocity * mean[:, 4],  # vy
-                self._std_weight_velocity_z * mean[:, 4],  # vz
-                1e-5 * np.ones_like(mean[:, 4]),  # va
-                self._std_weight_velocity * mean[:, 4],  # vh
-            ],
-        ).T
-        sqr = np.square(np.hstack([std_pos, std_vel]))
+        std_pos = [
+            self._std_weight_position * mean[:, 4],  # x
+            self._std_weight_position * mean[:, 4],  # y
+            self._std_weight_position_z * mean[:, 4],  # z
+            1e-2 * np.ones_like(mean[:, 4]),  # a
+            self._std_weight_position * mean[:, 4],  # h
+        ]
+        std_vel = [
+            self._std_weight_velocity * mean[:, 4],  # vx
+            self._std_weight_velocity * mean[:, 4],  # vy
+            self._std_weight_velocity_z * mean[:, 4],  # vz
+            1e-5 * np.ones_like(mean[:, 4]),  # va
+            self._std_weight_velocity * mean[:, 4],  # vh
+        ]
+        sqr = np.square(np.r_[std_pos, std_vel]).T
 
         motion_cov = np.array([np.diag(sqr[i]) for i in range(len(mean))])
 
         mean = np.dot(mean, self._motion_mat.T)
-        # Efficient batch computation
-        covariance = np.einsum("ij,njk->nik", self._motion_mat, covariance)
-        covariance = np.einsum("njk,ik->nij", covariance, self._motion_mat.T) + motion_cov
+        left = np.dot(self._motion_mat, covariance).transpose((1, 0, 2))
+        covariance = np.dot(left, self._motion_mat.T) + motion_cov
 
         return mean, covariance
 
@@ -233,7 +227,7 @@ class KalmanFilterXYZAH:
         self,
         mean: np.ndarray,
         covariance: np.ndarray,
-        measurement: np.ndarray = None,
+        measurement: np.ndarray,
         measurement_mask: np.ndarray = None,
     ) -> tuple:
         """
@@ -242,16 +236,15 @@ class KalmanFilterXYZAH:
         Args:
             mean (ndarray): The predicted state's mean vector (10-dimensional).
             covariance (ndarray): The state's covariance matrix (10x10-dimensional).
-            measurement (ndarray, optional): The 5-dimensional measurement vector (x, y, z, a, h).
-            measurement_mask (ndarray, optional): A boolean array indicating which measurements are available.
+            measurement (ndarray): The 5-dimensional measurement vector (x, y, z, a, h).
+            measurement_mask (ndarray): A boolean array indicating which measurements are available.
 
         Returns:
             (tuple[ndarray, ndarray]): Returns the measurement-corrected state distribution.
 
         """
-        if measurement is None or measurement_mask is None:
-            # No measurements available; skip the update step
-            return mean, covariance
+        if measurement_mask is None:
+            measurement_mask = np.array([True, True, True, True, True])
 
         # Select only the available measurements
         available_indices = np.where(measurement_mask)[0]
@@ -271,14 +264,14 @@ class KalmanFilterXYZAH:
         z = measurement[available_indices]
 
         # Compute Kalman Gain
-        S = covariance_proj + np.diag(
-            [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices],
+        S = (
+            covariance_proj
+            + np.diag(
+                [self._std_weight_position * mean[4] if i < 4 else 1e-2 for i in available_indices],
+            )
+            ** 2
         )
-        try:
-            K = np.dot(covariance, H.T) @ np.linalg.inv(S)
-        except np.linalg.LinAlgError:
-            # If S is singular, use pseudo-inverse
-            K = np.dot(covariance, H.T) @ np.linalg.pinv(S)
+        K = np.dot(covariance, H.T) @ np.linalg.inv(S)
 
         # Innovation
         y = z - mean_proj
@@ -334,18 +327,18 @@ class KalmanFilterXYZAH:
         if metric == "gaussian":
             return np.sum(d * d, axis=1)
         if metric == "maha":
-            try:
-                cholesky_factor = np.linalg.cholesky(covariance_proj)
-                z = scipy.linalg.solve_triangular(
-                    cholesky_factor,
-                    d.T,
-                    lower=True,
-                    check_finite=False,
-                    overwrite_b=True,
-                )
-                return np.sum(z * z, axis=0)  # square Mahalanobis
-            except np.linalg.LinAlgError:
-                # If covariance is not positive definite, fallback to pseudo-inverse
-                inv_cov = np.linalg.pinv(covariance_proj)
-                return np.einsum("ij,ij->i", d, np.dot(d, inv_cov))
+            # try:
+            cholesky_factor = np.linalg.cholesky(covariance_proj)
+            z = scipy.linalg.solve_triangular(
+                cholesky_factor,
+                d.T,
+                lower=True,
+                check_finite=False,
+                overwrite_b=True,
+            )
+            return np.sum(z * z, axis=0)  # square Mahalanobis
+        # except np.linalg.LinAlgError:
+        #    # If covariance is not positive definite, fallback to pseudo-inverse
+        #    inv_cov = np.linalg.pinv(covariance_proj)
+        #    return np.einsum("ij,ij->i", d, np.dot(d, inv_cov))
         raise ValueError("Invalid distance metric")

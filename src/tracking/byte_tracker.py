@@ -265,10 +265,14 @@ class BYTETracker:
         # Make sure all the tracks in the tracked_stracks are activated and lost_stracks are not activated
         for track in self.tracked_stracks:
             if track.state != TrackState.Tracked:
-                track.state = TrackState.Tracked
+                # remove the track from the list
+                self.tracked_stracks.remove(track)
+                self.lost_stracks.append(track)
         for track in self.lost_stracks:
             if track.state != TrackState.Lost:
-                track.state = TrackState.Lost
+                # remove the track from the list
+                self.lost_stracks.remove(track)
+                self.removed_stracks.append(track)
 
         return self.get_active_tracks()
 
@@ -725,11 +729,11 @@ class BYTETracker:
             removed_stracks (List[STrackFeature]): Removed stracks.
         """
         # Step 1: Remove tracks from tracked_stracks that are no longer Tracked
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
+        # self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
 
         # Step 2: Add activated and refound stracks to tracked_stracks
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
+        self.tracked_stracks = self.joint_stracks(refind_stracks, activated_stracks)
+        # self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
 
         # Step 3: Remove activated and refound tracks from lost_stracks
         activated_ids = set(track.track_id for track in activated_stracks + refind_stracks)
